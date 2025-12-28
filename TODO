@@ -1,0 +1,35 @@
+- Track debug information through all different compiler stages
+- Use a single consistant FunctionId throughout every stage
+- Track the associated source locations of varible declorations
+- Track the source locations for all nodes in the AST
+- Track the associated AST nodes for all IR instructions
+- Track the associated IR instructions for all lower level IR instructions
+- Allow spesifiying copy/move semantics for function parameters
+- Implement returns
+- Figure out a better way to have compiler intrinsics
+- Track variable names through all stages for better debug info
+- Create more descriptive names for generated registers and physical locations for easier debugging
+- Differentiate copy/move semantics in the lower level IR for easier optimizations
+    - Implement Copy instructions in the lower level IR
+- Implement a cost calculation model for lower level IR instructions to guide physical register allocation
+- Think of a better way to deal with operations that require a spesific memory layout of parameters that are not functions
+    - e.g. indirect read/write operations
+- Implement better visualizations for all compiler stage outputs and transformations for easier debugging
+- Implement instruction reordering to reduce register lifetimes
+- Implement dead code elimination across all stages
+- Implement a completely seporate physical register allocation stage
+- Figure out all the end features needed for self hosting
+    - Conditionals
+    - Loops
+    - Structs
+    - Arrays
+    - Enums with accociated data
+    - Enum pattern matching
+    - Namespaces / modules / includes
+    - Standard library
+    - Generics
+    - Type inference/optional type annotations
+- Add in some basic timing benchmarks for all stages of the compiler
+
+- Write custom brainfuck runner that is able to also take in debug information from the compiled code to allow step through debugging of brainfuck programs with different stage outputs tracked
+- Write a sort of brainfuck profiler that tracks instructions executed

@@ -7,6 +7,7 @@ use crate::parser::{ASTType, Block, BlockItem, Expression, Function, FunctionId,
 #[derive(Debug)]
 pub struct TypedProgram {
     pub functions: Vec<TypedFunction>,
+    pub function_name_mapping: HashMap<FunctionId, String>,
 }
 
 #[derive(Debug)]
@@ -124,7 +125,7 @@ impl From<ASTType> for Type {
     }
 }
 
-struct FunctionSignature {
+pub struct FunctionSignature {
     param_types: Vec<Type>,
     return_type: Type,
 }
@@ -161,12 +162,16 @@ pub fn type_annotate_program(ast_program: Program) -> TypedProgram {
         param_types: vec![Type::U8],
         return_type: Type::Void,
     });
-    
 
+    let mut reversed_function_name_map = HashMap::new();
+    for (function_name, function_id) in function_name_map.clone() {
+        reversed_function_name_map.insert(function_id, function_name);
+    }
 
 
     TypedProgram { 
-        functions: ast_program.functions.into_iter().map(|f| type_annotate_function(f, &function_name_map, &function_signature_map)).collect()
+        functions: ast_program.functions.into_iter().map(|f| type_annotate_function(f, &function_name_map, &function_signature_map)).collect(),
+        function_name_mapping: reversed_function_name_map
     }
 }
 
@@ -188,7 +193,7 @@ fn type_annotate_function(ast_function: Function, function_name_map: &HashMap<St
     // Placeholder implementation
     TypedFunction {
         params: typed_function_params,
-        body: TypedBlock { statements: vec![] },
+        body: typed_body,
         variable_map: variable_type_map,
         id: ast_function.id,
     }

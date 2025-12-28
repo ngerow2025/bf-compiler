@@ -1,22 +1,22 @@
 use std::collections::HashMap;
-
+use std::fmt::{Display, Formatter};
 use crate::tokenizer::Token;
 
 // --- AST Definitions ---
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub functions: Vec<Function>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionParam {
     pub type_: ASTType,
     pub variable_index: VariableId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub params: Vec<FunctionParam>,
@@ -27,18 +27,24 @@ pub struct Function {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionId(pub(crate) usize);
 
-#[derive(Debug)]
+impl Display for FunctionId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FUNCTION_ID({})", self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum BlockItem {
     Statement(Statement),
     Block(Block),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<BlockItem>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     // let x: type = expr;
     VarDecl { name: String, type_: ASTType, value: Expression, variable_index: VariableId }, 
