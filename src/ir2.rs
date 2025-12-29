@@ -190,7 +190,7 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
 // this represents an actual location in the stack
 // size is implicitly 1 byte
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-struct PhysicalLocation(usize); // offset from stack frame adress
+pub struct PhysicalLocation(pub usize); // offset from stack frame adress
 
 struct PhysicalLocationAllocator {
     next_avalible_space: PhysicalLocation,
@@ -642,7 +642,7 @@ fn lower_ir_function(
                     })
                     .sum();
                 let new_stack_frame_base = PhysicalLocation(
-                    physical_space_allocator.next_avalible_space.0 + total_param_size,
+                    physical_space_allocator.next_avalible_space.0 + total_param_size + 1,
                 );
 
                 let mut call_setup_code = vec![];
