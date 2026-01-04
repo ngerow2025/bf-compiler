@@ -1,3 +1,4 @@
+use compiler_bf_target::tokenizer::TokenEmitter;
 use compiler_bf_target::{ir2::print_instruction_with_lifetime_annotations, parser::Parser, tokenizer::Lexer};
 use compiler_bf_target::ir2::generate_ir2;
 use compiler_bf_target::ir::generate_ir;
@@ -15,7 +16,7 @@ fn main(){
     let input_file = &args[1];
     let source_code = std::fs::read_to_string(input_file)
         .expect("Failed to read input file");
-    let mut lexer = Lexer::new(&source_code);
+    let mut lexer = Lexer::new(&source_code, TokenEmitter{});
     let tokens = lexer.tokenize();
     let mut parser = Parser::new(tokens);
     let ast = parser.parse_program();

@@ -460,13 +460,13 @@ pub enum ASTType {
 
 #[cfg(test)]
 mod parser_tests {
-    use crate::tokenizer::Lexer;
+    use crate::tokenizer::{Lexer, TokenEmitter};
 
     use super::*;
 
     // Helper to tokenize then parse
     fn parse(input: &str) -> Result<Program, String> {
-        let mut lexer = Lexer::new(input);
+        let mut lexer = Lexer::new(input, TokenEmitter{});
         let tokens = lexer.tokenize();
         let mut parser = Parser::new(tokens);
         parser.parse_program()
