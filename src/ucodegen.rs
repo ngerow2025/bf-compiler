@@ -7,10 +7,10 @@ pub struct BfGenerator {
     code: Vec<BfUcodeInstruction>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocationId(pub usize);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Location {
     Absolute(usize),
     Relative(i64),
@@ -38,8 +38,7 @@ pub enum BfUcodeInstruction {
     Inc(u8),
     Dec(u8),
     Loop(Vec<BfUcodeInstruction>),
-    JumpDestination(LocationId),
-    Jump(LocationId),
+    JumpLocation { this_location: LocationId, target_location: LocationId },
     Clear,
 }
 
@@ -63,8 +62,8 @@ impl Display for BfUcodeInstruction {
                     }
                     format!("Loop {{\n{}}}", body_str)
                 }
-                BfUcodeInstruction::JumpDestination(loc) => format!("JumpDestination({})", loc.0),
-                BfUcodeInstruction::Jump(loc) => format!("Jump({})", loc.0),
+                BfUcodeInstruction::JumpLocation { this_location, target_location } =>
+                    format!("JumpLocation(this: {}, target: {})", this_location.0, target_location.0),
                 BfUcodeInstruction::Clear => "Clear".to_string(),
             }
         )
@@ -288,15 +287,11 @@ impl BfGenerator {
                 *jump_points += 1;
                 let function_entry = entry_points.get(function_id).unwrap();
                 vec![
-                    //set new_stack_frame_base - 1 to the return address
-                    BfUcodeInstruction::MovePtr (Location::Absolute(new_stack_frame_base.0 - 1)),
-                    BfUcodeInstruction::Inc(return_address.0 as u8),
+                    //codegen will set up all of the return addressing and jump handling with its 3 reserved cells right before the new stack frame base
                     //move to the actual new stack frame base
                     BfUcodeInstruction::MovePtr (Location::Absolute(new_stack_frame_base.0)),
                     //jump to function
-                    BfUcodeInstruction::Jump(*function_entry),
-                    //return address
-                    BfUcodeInstruction::JumpDestination(return_address),
+                    BfUcodeInstruction::JumpLocation { this_location: return_address, target_location: *function_entry }
                 ]
             }
             Ir2Instruction::Input { target } => {
@@ -314,15 +309,15 @@ impl BfGenerator {
         });
     }
 
-    pub fn codegen_program(
+    pub fn ucodegen_program(
         program: HashMap<FunctionId, Ir2Function>,
-    ) -> HashMap<FunctionId, Vec<BfUcodeInstruction>> {
+    ) -> UCodeProgram {
         let mut total_results = HashMap::new();
         let mut entry_points = HashMap::new();
         for function_id in program.keys() {
-            entry_points.insert(function_id, LocationId(entry_points.len()));
+            entry_points.insert(function_id, LocationId(entry_points.len() + 1));
         }
-        let mut jump_points = entry_points.len();
+        let mut jump_points = entry_points.len() + 1;
         for (function_id, function) in &program {
             let mut bf_generator = BfGenerator::new();
 
@@ -333,6 +328,15 @@ impl BfGenerator {
             let generated_bf = bf_generator.code;
             total_results.insert(*function_id, generated_bf);
         }
-        total_results
+
+        UCodeProgram {
+            functions: total_results,
+            entry_points: entry_points.into_iter().map(|(k, v)| (*k, v)).collect(),
+        }
     }
+}
+
+pub struct UCodeProgram {
+    pub functions: HashMap<FunctionId, Vec<BfUcodeInstruction>>,
+    pub entry_points: HashMap<FunctionId, LocationId>,
 }

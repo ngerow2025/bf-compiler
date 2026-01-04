@@ -642,7 +642,7 @@ fn lower_ir_function(
                     })
                     .sum();
                 let new_stack_frame_base = PhysicalLocation(
-                    physical_space_allocator.next_avalible_space.0 + total_param_size + 1,
+                    physical_space_allocator.next_avalible_space.0 + total_param_size + 3,
                 );
 
                 let mut call_setup_code = vec![];
