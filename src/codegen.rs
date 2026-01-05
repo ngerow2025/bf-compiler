@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::fmt::Display;
 use crate::parser::FunctionId;
 use crate::ucodegen::{BfUcodeInstruction, Location, LocationId, UCodeProgram};
+use std::collections::HashMap;
+use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum BfInstruction {
@@ -15,20 +15,28 @@ pub enum BfInstruction {
     LoopEnd,
 }
 
-
 pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfInstruction> {
-
     let mut code_blocks = HashMap::new();
 
     for (function_id, instructions) in ucode.functions {
         let mut bf_instructions = Vec::new();
         let mut block_id = *ucode.entry_points.get(&function_id).unwrap();
-        assert_ne!(block_id, LocationId(0), "Function entry point can not be at location 0");
+        assert_ne!(
+            block_id,
+            LocationId(0),
+            "Function entry point can not be at location 0"
+        );
         let mut current_point_position = 0;
         for instruction in instructions {
-            if let Some(direct_code) = direct_codegen_ucode_instruction(instruction.clone(), &mut current_point_position) {
+            if let Some(direct_code) =
+                direct_codegen_ucode_instruction(instruction.clone(), &mut current_point_position)
+            {
                 bf_instructions.extend(direct_code);
-            } else if let BfUcodeInstruction::JumpLocation { this_location, target_location} = instruction {
+            } else if let BfUcodeInstruction::JumpLocation {
+                this_location,
+                target_location,
+            } = instruction
+            {
                 bf_instructions.push(BfInstruction::Left);
                 bf_instructions.push(BfInstruction::Left);
                 bf_instructions.push(BfInstruction::Left);
@@ -38,7 +46,6 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
                 code_blocks.insert(block_id, bf_instructions);
                 bf_instructions = Vec::new();
                 block_id = this_location;
-
             } else {
                 panic!("Unhandled instruction: {:?} ?", instruction);
             }
@@ -46,31 +53,24 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
         bf_instructions.push(BfInstruction::Left);
         bf_instructions.push(BfInstruction::Left);
         //move to the return address location for the jump
-                    
     }
-    
-    
+
     let mut bf_code = Vec::new();
 
     //first generate the code to jump to the entry point
     bf_code.push(BfInstruction::Right);
     bf_code.extend(vec![BfInstruction::Inc; entry_point.0]); //set the entry jump target
-    
+
     //the main loop start
     bf_code.push(BfInstruction::LoopStart);
     bf_code.push(BfInstruction::Right);
     bf_code.push(BfInstruction::Inc); //set the flag to 1
     bf_code.push(BfInstruction::Left);
-    
-
-    
-
-    
 
     //itterate through the code blocks in the order of their location ids
     let mut sorted_code_blocks = code_blocks.into_iter().collect::<Vec<_>>();
     sorted_code_blocks.sort_by_key(|(location_id, _)| *location_id);
-    
+
     bf_code.extend(codegen_switch_statement(
         sorted_code_blocks,
         0,
@@ -78,20 +78,26 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
     ));
 
     bf_code.push(BfInstruction::LoopEnd);
-    
-
 
     bf_code
 }
 
-fn codegen_switch_statement(remaining_cases: Vec<(LocationId, Vec<BfInstruction>)>, current_subtracted_val: usize, default_case: Vec<BfInstruction>) -> Vec<BfInstruction> {
+fn codegen_switch_statement(
+    remaining_cases: Vec<(LocationId, Vec<BfInstruction>)>,
+    current_subtracted_val: usize,
+    default_case: Vec<BfInstruction>,
+) -> Vec<BfInstruction> {
     match remaining_cases.split_first() {
         Some(((location_id, case_instructions), rest_cases)) => {
             let mut code = Vec::new();
             let diff = location_id.0 - current_subtracted_val;
             code.extend(vec![BfInstruction::Dec; diff]);
             code.push(BfInstruction::LoopStart);
-            code.extend(codegen_switch_statement(Vec::from(rest_cases), location_id.0, default_case));
+            code.extend(codegen_switch_statement(
+                Vec::from(rest_cases),
+                location_id.0,
+                default_case,
+            ));
             code.push(BfInstruction::LoopEnd);
             code.push(BfInstruction::Right); //move to the flag
             code.push(BfInstruction::LoopStart); //check the flag
@@ -105,7 +111,6 @@ fn codegen_switch_statement(remaining_cases: Vec<(LocationId, Vec<BfInstruction>
             code.push(BfInstruction::Left);
             code.push(BfInstruction::LoopEnd);
 
-            
             code.push(BfInstruction::Right); //move to the new base 
             code.push(BfInstruction::Right);
             code.push(BfInstruction::Right);
@@ -142,8 +147,6 @@ fn codegen_switch_statement(remaining_cases: Vec<(LocationId, Vec<BfInstruction>
             code
         }
     }
-
-
 }
 
 fn direct_codegen_ucode_instruction(
@@ -157,47 +160,38 @@ fn direct_codegen_ucode_instruction(
         BfUcodeInstruction::MovePtr(location) => {
             Some(codegen_move_ptr(current_point_position, location))
         }
-        BfUcodeInstruction::MoveData { from, to } => {
-            Some(codegen_move_ptr(current_point_position, from)
+        BfUcodeInstruction::MoveData { from, to } => Some(
+            codegen_move_ptr(current_point_position, from)
                 .into_iter()
-                .chain([
-                    BfInstruction::LoopStart,
-                    BfInstruction::Dec,
-                ])
+                .chain([BfInstruction::LoopStart, BfInstruction::Dec])
                 .chain(codegen_move_ptr(current_point_position, to))
-                .chain([
-                    BfInstruction::Inc,
-                ])
+                .chain([BfInstruction::Inc])
                 .chain(codegen_move_ptr(current_point_position, from))
-                .chain([
-                    BfInstruction::LoopEnd,
-                ])
-                .collect::<Vec<_>>())
-        }
-        BfUcodeInstruction::Inc(x) => Some(vec![BfInstruction::Inc; x as usize]),
-        BfUcodeInstruction::Loop(inner) => {
-            vec![BfInstruction::LoopStart]
-                .into_iter()
-                .chain(inner.into_iter().flat_map(|instr| {
-                    direct_codegen_ucode_instruction(instr, current_point_position).expect("can not handle function calls inside loops yet")
-                }))
                 .chain([BfInstruction::LoopEnd])
-                .collect::<Vec<_>>()
-                .into()
-        }
+                .collect::<Vec<_>>(),
+        ),
+        BfUcodeInstruction::Inc(x) => Some(vec![BfInstruction::Inc; x as usize]),
+        BfUcodeInstruction::Loop(inner) => vec![BfInstruction::LoopStart]
+            .into_iter()
+            .chain(inner.into_iter().flat_map(|instr| {
+                direct_codegen_ucode_instruction(instr, current_point_position)
+                    .expect("can not handle function calls inside loops yet")
+            }))
+            .chain([BfInstruction::LoopEnd])
+            .collect::<Vec<_>>()
+            .into(),
         BfUcodeInstruction::JumpLocation { .. } => None,
-        BfUcodeInstruction::Clear => {
-            Some(vec![BfInstruction::LoopStart, BfInstruction::Dec, BfInstruction::LoopEnd])
-        }
+        BfUcodeInstruction::Clear => Some(vec![
+            BfInstruction::LoopStart,
+            BfInstruction::Dec,
+            BfInstruction::LoopEnd,
+        ]),
     }
 }
 
-
 fn codegen_move_ptr(current_point_position: &mut isize, location: Location) -> Vec<BfInstruction> {
     match location {
-        Location::Absolute(x) => {
-            move_to_absolute(current_point_position, x as isize)
-        }
+        Location::Absolute(x) => move_to_absolute(current_point_position, x as isize),
         Location::Relative(x) => {
             if x >= 0 {
                 *current_point_position += x as isize;

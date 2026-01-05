@@ -1,9 +1,11 @@
-use compiler_bf_target::{ir2::print_instruction_with_lifetime_annotations, parser, tokenizer::Lexer};
-use compiler_bf_target::ir2::generate_ir2;
+use compiler_bf_target::codegen::codegen_program;
 use compiler_bf_target::ir::generate_ir;
+use compiler_bf_target::ir2::generate_ir2;
 use compiler_bf_target::type_check::type_annotate_program;
 use compiler_bf_target::ucodegen::BfGenerator;
-use compiler_bf_target::codegen::codegen_program;
+use compiler_bf_target::{
+    ir2::print_instruction_with_lifetime_annotations, parser, tokenizer::Lexer,
+};
 
 use clap::Parser;
 use miette::Result;
@@ -18,25 +20,30 @@ struct Cli {
     output_file: String,
 }
 
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
-    let source_code = std::fs::read_to_string(cli.source_file.clone())
-        .expect("Failed to read input file");
+
+    let source_code =
+        std::fs::read_to_string(cli.source_file.clone()).expect("Failed to read input file");
     let mut lexer = Lexer::new(&source_code, Some(cli.source_file.clone()));
     let tokens = lexer.tokenize_with_locations()?;
     let mut parser = parser::Parser::new(tokens);
     let ast = parser.parse_program();
     let type_checked = type_annotate_program(ast.clone().unwrap());
 
-    let entry_point = type_checked.function_name_mapping.iter().filter(|(_, name)| *name == "main").map(|(id, _)| *id).next().expect("No main function found");
+    let entry_point = type_checked
+        .function_name_mapping
+        .iter()
+        .filter(|(_, name)| *name == "main")
+        .map(|(id, _)| *id)
+        .next()
+        .expect("No main function found");
 
     let generated_ir = generate_ir(&type_checked);
 
     // println!("raw AST: {:#?}", ast);
     println!("typed checked AST: {:#?}", type_checked);
-    
+
     for function in &generated_ir {
         print_instruction_with_lifetime_annotations(function);
         print!("\n\n\n");
@@ -67,11 +74,14 @@ fn main() -> Result<()> {
         print!("{}", instruction);
     }
 
-    // if let 
+    // if let
 
     //write the generated bf code to a file
     let output_file = format!("{}.bf", cli.output_file);
-    let bf_code_string: String = final_bf_code.iter().map(|instr| instr.to_string()).collect::<String>();
+    let bf_code_string: String = final_bf_code
+        .iter()
+        .map(|instr| instr.to_string())
+        .collect::<String>();
     std::fs::write(&output_file, bf_code_string).expect("Failed to write output file");
     println!("Generated Brainfuck code written to {}", output_file);
 

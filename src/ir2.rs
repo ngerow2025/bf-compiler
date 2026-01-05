@@ -3,11 +3,11 @@
 
 use std::{collections::HashMap, fmt::Display, vec};
 
+use crate::parser::FunctionId;
 use crate::{
     ir::{IrFunction, IrInstruction, IrMoveOperand, IrRegisterId},
     parser::IntLiteral,
 };
-use crate::parser::FunctionId;
 //do instruction level dependency tracking here so that we can reorder instructions to reduce memory usage
 
 fn get_instruction_dependencies(instr: &IrInstruction) -> Vec<IrRegisterId> {
@@ -986,7 +986,6 @@ pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Fu
     lowered_functions
 }
 
-
 impl Display for PhysicalLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "%{}%", self.0)
@@ -1006,24 +1005,28 @@ impl Display for Ir2Instruction {
                 write!(f, "MOVE [SP + {}] <- [SP + {}]", target, source)
             }
             Ir2Instruction::NMove { targets, source } => {
-                let target_strs: Vec<String> = targets
-                    .iter()
-                    .map(|t| format!("[SP + {}]", t))
-                    .collect();
+                let target_strs: Vec<String> =
+                    targets.iter().map(|t| format!("[SP + {}]", t)).collect();
                 write!(f, "NMOVE {} <- [SP + {}]", target_strs.join(", "), source)
             }
-            Ir2Instruction::BulkMove { target, source, size } => {
+            Ir2Instruction::BulkMove {
+                target,
+                source,
+                size,
+            } => {
                 write!(
                     f,
                     "BULK_MOVE [SP + {}] <- [SP + {}] SIZE {}",
                     target, source, size
                 )
             }
-            Ir2Instruction::BulkNMove { targets, source, size } => {
-                let target_strs: Vec<String> = targets
-                    .iter()
-                    .map(|t| format!("[SP + {}]", t))
-                    .collect();
+            Ir2Instruction::BulkNMove {
+                targets,
+                source,
+                size,
+            } => {
+                let target_strs: Vec<String> =
+                    targets.iter().map(|t| format!("[SP + {}]", t)).collect();
                 write!(
                     f,
                     "BULK_NMOVE {} <- [SP + {}] SIZE {}",
@@ -1032,56 +1035,92 @@ impl Display for Ir2Instruction {
                     size
                 )
             }
-            Ir2Instruction::MoveFromIndirect { base, offset, output } => {
+            Ir2Instruction::MoveFromIndirect {
+                base,
+                offset,
+                output,
+            } => {
                 write!(
                     f,
                     "MOVE_FROM_INDIRECT [SP + {} + [SP + {}]] -> [SP + {}]",
                     base, offset, output
                 )
             }
-            Ir2Instruction::MoveFromIndirectConstant { base, offset, output } => {
+            Ir2Instruction::MoveFromIndirectConstant {
+                base,
+                offset,
+                output,
+            } => {
                 write!(
                     f,
                     "MOVE_FROM_INDIRECT_CONST [SP + {} + {}] -> [SP + {}]",
                     base, offset, output
                 )
             }
-            Ir2Instruction::MoveFromIndirectArray { base, offset, output, element_size } => {
+            Ir2Instruction::MoveFromIndirectArray {
+                base,
+                offset,
+                output,
+                element_size,
+            } => {
                 write!(
                     f,
                     "MOVE_FROM_INDIRECT_CONST [SP + {} + {} * {}] -> [SP + {}] size {}",
                     base, offset, element_size, output, element_size
                 )
             }
-            Ir2Instruction::MoveFromIndirectArrayConstant { base, offset, output, element_size } => {
+            Ir2Instruction::MoveFromIndirectArrayConstant {
+                base,
+                offset,
+                output,
+                element_size,
+            } => {
                 write!(
                     f,
                     "MOVE_FROM_INDIRECT_ARRAY_CONST [SP + {} + {} * {}] -> [SP + {}] size {}",
                     base, offset, element_size, output, element_size
                 )
             }
-            Ir2Instruction::MoveToIndirectArray { base, offset, element_size, value } => {
+            Ir2Instruction::MoveToIndirectArray {
+                base,
+                offset,
+                element_size,
+                value,
+            } => {
                 write!(
                     f,
                     "MOVE_TO_INDIRECT_ARRAY [SP + {} + {} * {}] <- [SP + {}] size {}",
                     base, offset, element_size, value, element_size
                 )
             }
-            Ir2Instruction::MoveToIndirectArrayConstant { base, offset, element_size, value } => {
+            Ir2Instruction::MoveToIndirectArrayConstant {
+                base,
+                offset,
+                element_size,
+                value,
+            } => {
                 write!(
                     f,
                     "MOVE_TO_INDIRECT_ARRAY_CONST [SP + {} + {} * {}] <- [SP + {}] size {}",
                     base, offset, element_size, value, element_size
                 )
             }
-            Ir2Instruction::MoveToIndirect { base, offset, value } => {
+            Ir2Instruction::MoveToIndirect {
+                base,
+                offset,
+                value,
+            } => {
                 write!(
                     f,
                     "MOVE_TO_INDIRECT [SP + {} + [SP + {}]] <- [SP + {}]",
                     base, offset, value
                 )
             }
-            Ir2Instruction::MoveToIndirectConstant { base, offset, value } => {
+            Ir2Instruction::MoveToIndirectConstant {
+                base,
+                offset,
+                value,
+            } => {
                 write!(
                     f,
                     "MOVE_TO_INDIRECT_CONST [SP + {} + {}] <- [SP + {}]",
@@ -1089,27 +1128,27 @@ impl Display for Ir2Instruction {
                 )
             }
             Ir2Instruction::ClearIndirect { base, offset } => {
-                write!(
-                    f,
-                    "CLEAR_INDIRECT [SP + {} + [SP + {}]]",
-                    base, offset
-                )
+                write!(f, "CLEAR_INDIRECT [SP + {} + [SP + {}]]", base, offset)
             }
             Ir2Instruction::ClearIndirectConstant { base, offset } => {
-                write!(
-                    f,
-                    "CLEAR_INDIRECT_CONST [SP + {} + {}]",
-                    base, offset
-                )
+                write!(f, "CLEAR_INDIRECT_CONST [SP + {} + {}]", base, offset)
             }
-            Ir2Instruction::ClearIndirectArray { base, offset , element_size} => {
+            Ir2Instruction::ClearIndirectArray {
+                base,
+                offset,
+                element_size,
+            } => {
                 write!(
                     f,
                     "CLEAR_INDIRECT_CONST [SP + {} + {} * {}]",
                     base, offset, element_size
                 )
             }
-            Ir2Instruction::ClearIndirectArrayConstant { base, offset , element_size} => {
+            Ir2Instruction::ClearIndirectArrayConstant {
+                base,
+                offset,
+                element_size,
+            } => {
                 write!(
                     f,
                     "CLEAR_INDIRECT_ARRAY_CONST [SP + {} + {} * {}]",

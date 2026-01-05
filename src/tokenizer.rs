@@ -1,10 +1,10 @@
-use std::{default, fmt::Display};
 use std::iter::Peekable;
 use std::str::Chars;
 use std::sync::Arc;
+use std::{default, fmt::Display};
 
 use logos::Logos;
-use miette::{Diagnostic, NamedSource, SourceSpan, Result};
+use miette::{Diagnostic, NamedSource, Result, SourceSpan};
 use thiserror::Error;
 
 // --- Data Structures ---
@@ -17,7 +17,7 @@ pub struct SourceLocation {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum SourceCodeOrigin {
-    File(String), //String contains the file path
+    File(String),      //String contains the file path
     Anon(Arc<String>), //String contains the code itself
 }
 
@@ -38,10 +38,10 @@ pub enum LexingErrorKind {
 pub struct LexingError {
     #[source_code]
     pub src: NamedSource<String>,
-    
+
     #[label("error occurred here")]
     pub span: SourceSpan,
-    
+
     // The specific error variant
     #[diagnostic(transparent)]
     pub kind: LexingErrorKind,
@@ -68,7 +68,6 @@ impl std::error::Error for LexingError {
         self.kind.source()
     }
 }
-
 
 #[derive(Debug, PartialEq, Clone, Logos)]
 #[logos(skip r"[ \t\n\r]+")]
@@ -140,7 +139,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
-    
+
     let mut result = String::new();
     let mut chars = s.chars();
     chars.next(); // skip opening quote
@@ -153,11 +152,13 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
                     '\\' => result.push('\\'),
                     '"' => result.push('"'),
                     '\'' => result.push('\''),
-                    _ => return Err(LexingError {
-                        src: NamedSource::new("input", source.to_string()),
-                        span: (span.start, span.end - span.start).into(),
-                        kind: LexingErrorKind::InvalidEscapeSequence(escaped),
-                    }),
+                    _ => {
+                        return Err(LexingError {
+                            src: NamedSource::new("input", source.to_string()),
+                            span: (span.start, span.end - span.start).into(),
+                            kind: LexingErrorKind::InvalidEscapeSequence(escaped),
+                        });
+                    }
                 }
             }
         } else if c == '"' {
@@ -174,7 +175,7 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
-    
+
     let mut chars = s.chars();
     chars.next(); // skip opening quote
     let c = if let Some(c) = chars.next() {
@@ -185,11 +186,13 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
                     't' => '\t',
                     '\\' => '\\',
                     '\'' => '\'',
-                    _ => return Err(LexingError {
-                        src: NamedSource::new("input", source.to_string()),
-                        span: (span.start, span.end - span.start).into(),
-                        kind: LexingErrorKind::InvalidEscapeSequence(escaped),
-                    }),
+                    _ => {
+                        return Err(LexingError {
+                            src: NamedSource::new("input", source.to_string()),
+                            span: (span.start, span.end - span.start).into(),
+                            kind: LexingErrorKind::InvalidEscapeSequence(escaped),
+                        });
+                    }
                 }
             } else {
                 return Err(LexingError {
@@ -208,10 +211,12 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
             kind: LexingErrorKind::UnexpectedCharacter,
         });
     };
-    assert!(chars.next() == Some('\''), "Char literal not properly closed");
+    assert!(
+        chars.next() == Some('\''),
+        "Char literal not properly closed"
+    );
     Ok(c.to_string())
 }
-
 
 /// Implementation 2: Full Source Info
 #[derive(Debug, PartialEq, Clone)]
@@ -219,8 +224,6 @@ pub struct LocatableToken {
     pub token: Token,
     pub loc: SourceLocation,
 }
-
-
 
 // --- The Lexer ---
 
@@ -267,7 +270,7 @@ impl<'a> Lexer<'a> {
                         Err(self.finalize_error(&lexer, e))?;
                     } else {
                         Err(e)?;
-                    } 
+                    }
                 }
             }
         }
@@ -291,11 +294,10 @@ impl<'a> Lexer<'a> {
                         Err(self.finalize_error(&lexer, e))?;
                     } else {
                         Err(e)?;
-                    } 
+                    }
                 }
             }
         }
         Ok(tokens)
     }
-
 }

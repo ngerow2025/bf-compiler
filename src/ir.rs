@@ -1,7 +1,9 @@
 use std::fmt::Display;
 use std::{collections::HashMap, vec};
 
-use crate::parser::{Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program, Statement, VariableId};
+use crate::parser::{
+    Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program, Statement, VariableId,
+};
 use crate::type_check::*;
 
 #[derive(Debug)]
@@ -80,34 +82,57 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                 parameters: parameter_registers,
             }
         })
-        .map(|IrFunction { id, parameters, code: old_code, registers: old_registers  }| {
-            let mut deleted_registers = vec![];
-            let new_code = old_code.into_iter().map(|i| {
-                match i {
-                    IrInstruction::Call { function_id, parameters, output} => {
-                        if ast.function_name_mapping.get(&function_id) == Some(&"std::out".to_string()) {
-                            assert_eq!(parameters.len(), 1);
-                            deleted_registers.push(output);
-                            IrInstruction::Output { element: parameters[0] }
-                        } else if ast.function_name_mapping.get(&function_id) == Some(&"std::in".to_string()) {
-                            assert_eq!(parameters.len(), 0);
-                            IrInstruction::Input { target: output }
-                        } else {
-                            IrInstruction::Call { function_id, parameters, output }
+        .map(
+            |IrFunction {
+                 id,
+                 parameters,
+                 code: old_code,
+                 registers: old_registers,
+             }| {
+                let mut deleted_registers = vec![];
+                let new_code = old_code
+                    .into_iter()
+                    .map(|i| match i {
+                        IrInstruction::Call {
+                            function_id,
+                            parameters,
+                            output,
+                        } => {
+                            if ast.function_name_mapping.get(&function_id)
+                                == Some(&"std::out".to_string())
+                            {
+                                assert_eq!(parameters.len(), 1);
+                                deleted_registers.push(output);
+                                IrInstruction::Output {
+                                    element: parameters[0],
+                                }
+                            } else if ast.function_name_mapping.get(&function_id)
+                                == Some(&"std::in".to_string())
+                            {
+                                assert_eq!(parameters.len(), 0);
+                                IrInstruction::Input { target: output }
+                            } else {
+                                IrInstruction::Call {
+                                    function_id,
+                                    parameters,
+                                    output,
+                                }
+                            }
                         }
-                    }
-                    a => a
+                        a => a,
+                    })
+                    .collect();
+                let mut new_registers = old_registers.clone();
+                new_registers.retain(|k, v| !deleted_registers.contains(k));
+                IrFunction {
+                    id,
+                    parameters,
+                    code: new_code,
+                    registers: new_registers,
                 }
-            }).collect();
-            let mut new_registers = old_registers.clone();
-            new_registers.retain(|k, v| !deleted_registers.contains(k));
-            IrFunction {
-                id,
-                parameters,
-                code: new_code,
-                registers: new_registers
-            }
-        }).collect()
+            },
+        )
+        .collect()
 }
 
 struct RegisterTracker {

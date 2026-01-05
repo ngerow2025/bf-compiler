@@ -34,11 +34,17 @@ pub enum BfUcodeInstruction {
     Input,
     Output,
     MovePtr(Location),
-    MoveData { from: Location, to: Location },
+    MoveData {
+        from: Location,
+        to: Location,
+    },
     Inc(u8),
     Dec(u8),
     Loop(Vec<BfUcodeInstruction>),
-    JumpLocation { this_location: LocationId, target_location: LocationId },
+    JumpLocation {
+        this_location: LocationId,
+        target_location: LocationId,
+    },
     Clear,
 }
 
@@ -62,8 +68,13 @@ impl Display for BfUcodeInstruction {
                     }
                     format!("Loop {{\n{}}}", body_str)
                 }
-                BfUcodeInstruction::JumpLocation { this_location, target_location } =>
-                    format!("JumpLocation(this: {}, target: {})", this_location.0, target_location.0),
+                BfUcodeInstruction::JumpLocation {
+                    this_location,
+                    target_location,
+                } => format!(
+                    "JumpLocation(this: {}, target: {})",
+                    this_location.0, target_location.0
+                ),
                 BfUcodeInstruction::Clear => "Clear".to_string(),
             }
         )
@@ -75,7 +86,12 @@ impl BfGenerator {
         BfGenerator { code: vec![] }
     }
 
-    fn code_gen_ir_instruction(&mut self, instruction: &Ir2Instruction, jump_points: &mut usize, entry_points: &HashMap<&FunctionId, LocationId>) {
+    fn code_gen_ir_instruction(
+        &mut self,
+        instruction: &Ir2Instruction,
+        jump_points: &mut usize,
+        entry_points: &HashMap<&FunctionId, LocationId>,
+    ) {
         self.code.extend(match instruction {
             Ir2Instruction::Clear { target } => {
                 vec![
@@ -174,28 +190,55 @@ impl BfGenerator {
             } => {
                 let base = actual_base.0 + 1; //we only need 3 extra bytes before the actual array start, act like base is shifted by 1
                 vec![
-                    BfUcodeInstruction::MoveData { from: Location::Absolute(offset.0), to: Location::Absolute(base) },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::Absolute(offset.0),
+                        to: Location::Absolute(base),
+                    },
                     BfUcodeInstruction::MovePtr(Location::Absolute(base)),
                     BfUcodeInstruction::Loop(vec![
                         BfUcodeInstruction::Dec(1),
                         BfUcodeInstruction::MovePtr(Location::Relative(1)),
                         BfUcodeInstruction::Inc(1),
                         BfUcodeInstruction::MovePtr(Location::Relative(-1)),
-                        BfUcodeInstruction::MoveData { from: Location::Relative(1), to: Location::Relative(2) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(0), to: Location::Relative(1) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(3), to: Location::Relative(0) },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(1),
+                            to: Location::Relative(2),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(0),
+                            to: Location::Relative(1),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(3),
+                            to: Location::Relative(0),
+                        },
                         BfUcodeInstruction::MovePtr(Location::Relative(1)),
                     ]),
-                    BfUcodeInstruction::MoveData { from: Location::Relative(3), to: Location::Relative(2) },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::Relative(3),
+                        to: Location::Relative(2),
+                    },
                     BfUcodeInstruction::MovePtr(Location::Relative(1)),
                     BfUcodeInstruction::Loop(vec![
                         BfUcodeInstruction::Dec(1),
-                        BfUcodeInstruction::MoveData { from: Location::Relative(0), to: Location::Relative(-1) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(1), to: Location::Relative(0) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(-2), to: Location::Relative(1) },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(0),
+                            to: Location::Relative(-1),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(1),
+                            to: Location::Relative(0),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(-2),
+                            to: Location::Relative(1),
+                        },
                         BfUcodeInstruction::MovePtr(Location::Relative(-1)),
                     ]),
-                    BfUcodeInstruction::MoveData { from: Location::OffsetAbsolute {base, offset: 2}, to: Location::Absolute(output.0) },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::OffsetAbsolute { base, offset: 2 },
+                        to: Location::Absolute(output.0),
+                    },
                 ]
             }
 
@@ -204,9 +247,13 @@ impl BfGenerator {
                 offset,
                 output,
             } => {
-                vec![
-                    BfUcodeInstruction::MoveData { from: Location::OffsetAbsolute {base: base.0, offset: *offset as i64 + 4 }, to: Location::Absolute(output.0) }
-                ]
+                vec![BfUcodeInstruction::MoveData {
+                    from: Location::OffsetAbsolute {
+                        base: base.0,
+                        offset: *offset as i64 + 4,
+                    },
+                    to: Location::Absolute(output.0),
+                }]
             }
             //this does assume that there is 4 scratch cells before the actual array
             Ir2Instruction::MoveToIndirect {
@@ -217,27 +264,57 @@ impl BfGenerator {
                 //setup the following cells:
                 //ind -ind val 0 arr...
                 vec![
-                    BfUcodeInstruction::MoveData { from: Location::Absolute(offset.0), to: Location::Absolute(base.0) },
-                    BfUcodeInstruction::MoveData { from: Location::Absolute(value.0), to: Location::OffsetAbsolute { base: base.0, offset: 2 } },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::Absolute(offset.0),
+                        to: Location::Absolute(base.0),
+                    },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::Absolute(value.0),
+                        to: Location::OffsetAbsolute {
+                            base: base.0,
+                            offset: 2,
+                        },
+                    },
                     BfUcodeInstruction::MovePtr(Location::Absolute(base.0)),
                     BfUcodeInstruction::Loop(vec![
                         BfUcodeInstruction::Dec(1),
                         BfUcodeInstruction::MovePtr(Location::Relative(1)),
                         BfUcodeInstruction::Inc(1),
                         BfUcodeInstruction::MovePtr(Location::Relative(-1)),
-                        BfUcodeInstruction::MoveData { from: Location::Relative(2), to: Location::Relative(3) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(1), to: Location::Relative(2) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(0), to: Location::Relative(1) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(4), to: Location::Relative(0) },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(2),
+                            to: Location::Relative(3),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(1),
+                            to: Location::Relative(2),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(0),
+                            to: Location::Relative(1),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(4),
+                            to: Location::Relative(0),
+                        },
                         BfUcodeInstruction::MovePtr(Location::Relative(1)),
                     ]),
-                    BfUcodeInstruction::MoveData { from: Location::Relative(2), to: Location::Relative(4) },
+                    BfUcodeInstruction::MoveData {
+                        from: Location::Relative(2),
+                        to: Location::Relative(4),
+                    },
                     //layout: 0 ind 0 0
                     BfUcodeInstruction::MovePtr(Location::Relative(1)),
                     BfUcodeInstruction::Loop(vec![
                         BfUcodeInstruction::Dec(1),
-                        BfUcodeInstruction::MoveData { from: Location::Relative(-2), to: Location::Relative(2) },
-                        BfUcodeInstruction::MoveData { from: Location::Relative(0), to: Location::Relative(-1) },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(-2),
+                            to: Location::Relative(2),
+                        },
+                        BfUcodeInstruction::MoveData {
+                            from: Location::Relative(0),
+                            to: Location::Relative(-1),
+                        },
                         BfUcodeInstruction::MovePtr(Location::Relative(-1)),
                     ]),
                     BfUcodeInstruction::MovePtr(Location::Relative(-1)),
@@ -259,16 +336,15 @@ impl BfGenerator {
                 todo!("Need to actually do MoveFromIndirectArrayConstant")
             }
             Ir2Instruction::ClearBulk { target, size } => {
-                vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(target.0))
-                ].into_iter().chain((0..*size).flat_map(|_| {
-                    vec![
-                        BfUcodeInstruction::Loop(vec![
-                            BfUcodeInstruction::Dec(1)
-                        ]),
-                        BfUcodeInstruction::MovePtr(Location::Relative(1))
-                    ]
-                })).collect()
+                vec![BfUcodeInstruction::MovePtr(Location::Absolute(target.0))]
+                    .into_iter()
+                    .chain((0..*size).flat_map(|_| {
+                        vec![
+                            BfUcodeInstruction::Loop(vec![BfUcodeInstruction::Dec(1)]),
+                            BfUcodeInstruction::MovePtr(Location::Relative(1)),
+                        ]
+                    }))
+                    .collect()
             }
             Ir2Instruction::ClearIndirect { .. } => {
                 todo!("Need to actually do ClearIndirect")
@@ -282,36 +358,40 @@ impl BfGenerator {
             Ir2Instruction::ClearIndirectArrayConstant { .. } => {
                 todo!("Need to actually do ClearIndirectArrayConstant")
             }
-            Ir2Instruction::Call { function_id, new_stack_frame_base } => {
+            Ir2Instruction::Call {
+                function_id,
+                new_stack_frame_base,
+            } => {
                 let return_address = LocationId(*jump_points);
                 *jump_points += 1;
                 let function_entry = entry_points.get(function_id).unwrap();
                 vec![
                     //codegen will set up all of the return addressing and jump handling with its 3 reserved cells right before the new stack frame base
                     //move to the actual new stack frame base
-                    BfUcodeInstruction::MovePtr (Location::Absolute(new_stack_frame_base.0)),
+                    BfUcodeInstruction::MovePtr(Location::Absolute(new_stack_frame_base.0)),
                     //jump to function
-                    BfUcodeInstruction::JumpLocation { this_location: return_address, target_location: *function_entry }
+                    BfUcodeInstruction::JumpLocation {
+                        this_location: return_address,
+                        target_location: *function_entry,
+                    },
                 ]
             }
             Ir2Instruction::Input { target } => {
                 vec![
                     BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
-                    BfUcodeInstruction::Input
+                    BfUcodeInstruction::Input,
                 ]
             }
             Ir2Instruction::Output { element } => {
                 vec![
                     BfUcodeInstruction::MovePtr(Location::Absolute(element.0)),
-                    BfUcodeInstruction::Output
+                    BfUcodeInstruction::Output,
                 ]
             }
         });
     }
 
-    pub fn ucodegen_program(
-        program: HashMap<FunctionId, Ir2Function>,
-    ) -> UCodeProgram {
+    pub fn ucodegen_program(program: HashMap<FunctionId, Ir2Function>) -> UCodeProgram {
         let mut total_results = HashMap::new();
         let mut entry_points = HashMap::new();
         for function_id in program.keys() {
