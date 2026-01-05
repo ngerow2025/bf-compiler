@@ -1,9 +1,11 @@
+use miette::{ByteOffset, Diagnostic, NamedSource};
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt::{Display, Formatter};
-use crate::tokenizer::Token;
+
+use crate::tokenizer::{LocatableToken, Token};
 
 // --- AST Definitions ---
-
 
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -47,11 +49,19 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub enum Statement {
     // let x: type = expr;
-    VarDecl { name: String, type_: ASTType, value: Expression, variable_index: VariableId }, 
-    
+    VarDecl {
+        name: String,
+        type_: ASTType,
+        value: Expression,
+        variable_index: VariableId,
+    },
+
     // x = expr;
-    Assignment { var: VariableId, value: Expression },
-    
+    Assignment {
+        var: VariableId,
+        value: Expression,
+    },
+
     // expr;
     Expression(Expression),
 }
@@ -73,18 +83,82 @@ pub enum Expression {
     IntLiteral(IntLiteral),
     StringLiteral(String),
     Variable(VariableId),
-    ArrayAccess { array: VariableId, index_expr: Box<Expression> },
-    FnCall { name: String, arguments: Vec<Expression> },
+    ArrayAccess {
+        array: VariableId,
+        index_expr: Box<Expression>,
+    },
+    FnCall {
+        name: String,
+        arguments: Vec<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VariableId(usize);
 
+#[derive(Debug)]
+struct ExpectedTokenError {
+    expected: Token,
+    found: Option<LocatableToken>,
+    source: NamedSource<String>,
+}
+
+impl Diagnostic for ExpectedTokenError {
+    fn code<'a>(&'a self) -> Option<Box<dyn Display + 'a>> {
+        Some(Box::new(format!("ExpectedToken::{:?}", self.expected)))
+    }
+
+    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
+        Some(&self.source)
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn Display + 'a>> {
+        Some(Box::new(format!("{}", self)))
+    }
+
+    fn severity(&self) -> Option<miette::Severity> {
+        Some(miette::Severity::Error)
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        if let Some(found) = &self.found {
+            Some(Box::new(std::iter::once(
+                miette::LabeledSpan::new_with_span(Some("here".to_string()), found.loc.span),
+            )))
+        } else {
+            None
+        }
+    }
+}
+
+impl Display for ExpectedTokenError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.found {
+            Some(found) => write!(f, "Expected token {:?}, found {:?}", self.expected, found),
+            None => write!(f, "Expected token {:?}, found end of file", self.expected),
+        }
+    }
+}
+
+impl Error for ExpectedTokenError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        None
+    }
+
+    fn description(&self) -> &str {
+        "Expected Token Error"
+    }
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     variable_index: VariableId,
-    variable_tracker: Vec<HashMap<String, VariableId>>, 
+    variable_tracker: Vec<HashMap<String, VariableId>>,
 }
 
 impl Parser {
@@ -145,7 +219,6 @@ impl Parser {
 
         self.expect(Token::LParen)?;
 
-
         let mut params = Vec::new();
         //parse parameters
         //syntax: fn function_name(param: Type)
@@ -167,7 +240,10 @@ impl Parser {
                 .unwrap()
                 .insert(param_name.clone(), var_index);
 
-            params.push(FunctionParam { type_: param_type, variable_index: var_index });
+            params.push(FunctionParam {
+                type_: param_type,
+                variable_index: var_index,
+            });
 
             if self.peek() == Some(&Token::Comma) {
                 self.advance(); // consume comma
@@ -178,10 +254,14 @@ impl Parser {
 
         self.expect(Token::RParen)?;
 
-
         let body = self.parse_block()?;
 
-        Ok(Function { name, body, params, id })
+        Ok(Function {
+            name,
+            body,
+            params,
+            id,
+        })
     }
 
     fn parse_block(&mut self) -> Result<Block, String> {
@@ -235,7 +315,7 @@ impl Parser {
         };
 
         self.expect(Token::Colon)?;
-        
+
         // Parse Type
         let type_ = self.parse_type()?;
 
@@ -249,7 +329,10 @@ impl Parser {
         // make sure that a variable of this name does not already exist in the current scope
         for scope in self.variable_tracker.iter().rev() {
             if scope.contains_key(&name) {
-                return Err(format!("Variable '{}' already declared in this scope", name));
+                return Err(format!(
+                    "Variable '{}' already declared in this scope",
+                    name
+                ));
             }
         }
 
@@ -261,8 +344,12 @@ impl Parser {
             .unwrap()
             .insert(name.clone(), var_index);
 
-        
-        Ok(Statement::VarDecl { name, type_, value: expr_ast, variable_index: var_index })
+        Ok(Statement::VarDecl {
+            name,
+            type_,
+            value: expr_ast,
+            variable_index: var_index,
+        })
     }
 
     fn parse_assignment(&mut self) -> Result<Statement, String> {
@@ -286,8 +373,14 @@ impl Parser {
                 break;
             }
         }
-        let var_index = found_index.ok_or(format!("Variable '{}' not declared before assignment", name))?;
-        Ok(Statement::Assignment { var: var_index, value: expr_ast })
+        let var_index = found_index.ok_or(format!(
+            "Variable '{}' not declared before assignment",
+            name
+        ))?;
+        Ok(Statement::Assignment {
+            var: var_index,
+            value: expr_ast,
+        })
     }
 
     fn parse_fn_call(&mut self, identifier: String) -> Result<Expression, String> {
@@ -312,7 +405,7 @@ impl Parser {
         self.expect(Token::Semicolon)?;
 
         // function type checking will happen in a later phase
-        
+
         Ok(Expression::FnCall {
             name,
             arguments: args,
@@ -325,7 +418,9 @@ impl Parser {
 
         match token {
             Token::IntLiteral(s) => {
-                let int_lit_type = self.advance().ok_or("Expected type after integer literal")?;
+                let int_lit_type = self
+                    .advance()
+                    .ok_or("Expected type after integer literal")?;
                 Ok(match int_lit_type {
                     Token::TypeU8 => {
                         let val = s.parse().map_err(|_| "Invalid u8 literal")?;
@@ -379,13 +474,17 @@ impl Parser {
                         self.advance(); // consume '::'
                         let next_part = match self.advance() {
                             Some(Token::Identifier(n)) => n,
-                            t => return Err(format!("Expected identifier in qualified name, found {:?}", t)),
+                            t => {
+                                return Err(format!(
+                                    "Expected identifier in qualified name, found {:?}",
+                                    t
+                                ));
+                            }
                         };
                         full_name += &next_part;
                     }
                     self.parse_fn_call(full_name)
                 } else {
-
                     // look for the existing variable index
                     let mut found_index = None;
                     for scope in self.variable_tracker.iter().rev() {
@@ -395,7 +494,8 @@ impl Parser {
                         }
                     }
 
-                    let base_index = found_index.ok_or(format!("Variable '{}' not declared", name))?;
+                    let base_index =
+                        found_index.ok_or(format!("Variable '{}' not declared", name))?;
 
                     // if we peek an opening square bracket, this is an array access
                     if let Some(Token::LSquare) = self.peek() {
@@ -408,11 +508,12 @@ impl Parser {
                         return Ok(Expression::ArrayAccess {
                             array: base_index,
                             index_expr: Box::new(expr),
-                        })
+                        });
                     }
-                    Ok(Expression::Variable(found_index.ok_or(format!("Variable '{}' not declared", name))?))
+                    Ok(Expression::Variable(
+                        found_index.ok_or(format!("Variable '{}' not declared", name))?,
+                    ))
                 }
-            
             }
             _ => Err(format!("Invalid token in expression: {:?}", token)),
         }
@@ -442,7 +543,6 @@ impl Parser {
             _ => Err(format!("Unknown type token: {:?}", t)),
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -460,13 +560,13 @@ pub enum ASTType {
 
 #[cfg(test)]
 mod parser_tests {
-    use crate::tokenizer::{Lexer, TokenEmitter};
+    use crate::tokenizer::Lexer;
 
     use super::*;
 
     // Helper to tokenize then parse
     fn parse(input: &str) -> Result<Program, String> {
-        let mut lexer = Lexer::new(input, TokenEmitter{});
+        let mut lexer = Lexer::new(input, None);
         let tokens = lexer.tokenize();
         let mut parser = Parser::new(tokens);
         parser.parse_program()
@@ -521,7 +621,7 @@ mod parser_tests {
         "#;
         let res = parse(src);
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("not declared before assignment")); 
+        assert!(res.unwrap_err().contains("not declared before assignment"));
         // Or "Variable 'a' not declared" depending on parsing path
     }
 
@@ -536,7 +636,7 @@ mod parser_tests {
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("String overflow"));
     }
-    
+
     #[test]
     fn test_stdin_type() {
         // std::in returns u8. Trying to put it in u16 should fail.

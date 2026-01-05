@@ -1,67 +1,217 @@
+use std::{default, fmt::Display};
 use std::iter::Peekable;
 use std::str::Chars;
+use std::sync::Arc;
+
+use logos::Logos;
+use miette::{Diagnostic, NamedSource, SourceSpan, Result};
+use thiserror::Error;
 
 // --- Data Structures ---
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct SourceLocation {
-    pub line: usize,
-    pub col: usize,
+    pub span: SourceSpan,
+    pub origin: SourceCodeOrigin,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    // Keywords
-    Fn,
-    Let,
-    // Types
-    TypeU8,
-    TypeI8,
-    TypeU16,
-    TypeI16,
-    TypeU32,
-    TypeI32,
-    TypeU64,
-    TypeI64,
-    TypeStr,
-    // Symbols
-    LBrace,
-    RBrace,
-    LParen,
-    RParen,
-    LSquare,
-    RSquare,
-    Colon,
-    DoubleColon,
-    Semicolon,
-    Equals,
-    LAngle,
-    RAngle,
-    Comma,
-    // Literals & Identifiers
-    Identifier(String),
-    IntLiteral(String),
-    StringLiteral(String),
-
-    // Unknown / Error
-    Unknown(char),
+pub enum SourceCodeOrigin {
+    File(String), //String contains the file path
+    Anon(Arc<String>), //String contains the code itself
 }
 
-// --- Emitter Interface ---
-
-pub trait Emitter {
-    type Output;
-    fn emit(&mut self, token: Token, line: usize, col: usize) -> Self::Output;
+#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic)]
+pub enum LexingErrorKind {
+    #[error("Invalid escape sequence: \\{0}")]
+    InvalidEscapeSequence(char),
+    #[error("Invalid character literal: {0}")]
+    InvalidCharLiteral(char),
+    #[error("Unexpected character encountered")]
+    UnexpectedCharacter,
+    #[default]
+    #[error("Unknown lexing error")]
+    Other,
 }
 
-/// Implementation 1: Original behavior (Raw Tokens)
-pub struct TokenEmitter;
-impl Emitter for TokenEmitter {
-    type Output = Token;
-    fn emit(&mut self, token: Token, _: usize, _: usize) -> Self::Output {
-        token
+#[derive(Debug, Diagnostic, PartialEq, Clone)]
+pub struct LexingError {
+    #[source_code]
+    pub src: NamedSource<String>,
+    
+    #[label("error occurred here")]
+    pub span: SourceSpan,
+    
+    // The specific error variant
+    #[diagnostic(transparent)]
+    pub kind: LexingErrorKind,
+}
+
+impl Default for LexingError {
+    fn default() -> Self {
+        LexingError {
+            src: NamedSource::new("input", String::new()),
+            span: SourceSpan::new(0.into(), 0),
+            kind: LexingErrorKind::Other,
+        }
     }
 }
+
+impl Display for LexingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl std::error::Error for LexingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.kind.source()
+    }
+}
+
+
+#[derive(Debug, PartialEq, Clone, Logos)]
+#[logos(skip r"[ \t\n\r]+")]
+#[logos(error = LexingError)]
+pub enum Token {
+    // Keywords
+    #[token("fn")]
+    Fn,
+    #[token("let")]
+    Let,
+    // Types
+    #[token("u8")]
+    TypeU8,
+    #[token("i8")]
+    TypeI8,
+    #[token("u16")]
+    TypeU16,
+    #[token("i16")]
+    TypeI16,
+    #[token("u32")]
+    TypeU32,
+    #[token("i32")]
+    TypeI32,
+    #[token("u64")]
+    TypeU64,
+    #[token("i64")]
+    TypeI64,
+    #[token("str")]
+    TypeStr,
+    // Symbols
+    #[token("{")]
+    LBrace,
+    #[token("}")]
+    RBrace,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
+    #[token("[")]
+    LSquare,
+    #[token("]")]
+    RSquare,
+    #[token(":")]
+    Colon,
+    #[token("::")]
+    DoubleColon,
+    #[token(";")]
+    Semicolon,
+    #[token("=")]
+    Equals,
+    #[token("<")]
+    LAngle,
+    #[token(">")]
+    RAngle,
+    #[token(",")]
+    Comma,
+    // Literals & Identifiers
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
+    Identifier(String),
+    #[regex(r"[0-9]+", |lex| lex.slice().to_string())]
+    IntLiteral(String),
+    #[regex(r#""(?:\\.|[^"\\])*""#, |lex| parse_string(lex))]
+    StringLiteral(String),
+    #[regex(r#"'(?:\\.|[^'\\])'"#, |lex| parse_char(lex))]
+    CharLiteral(String),
+}
+
+fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
+    let s = lex.slice();
+    let span = lex.span();
+    let source = lex.source();
+    
+    let mut result = String::new();
+    let mut chars = s.chars();
+    chars.next(); // skip opening quote
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(escaped) = chars.next() {
+                match escaped {
+                    'n' => result.push('\n'),
+                    't' => result.push('\t'),
+                    '\\' => result.push('\\'),
+                    '"' => result.push('"'),
+                    '\'' => result.push('\''),
+                    _ => return Err(LexingError {
+                        src: NamedSource::new("input", source.to_string()),
+                        span: (span.start, span.end - span.start).into(),
+                        kind: LexingErrorKind::InvalidEscapeSequence(escaped),
+                    }),
+                }
+            }
+        } else if c == '"' {
+            break;
+        } else {
+            result.push(c);
+        }
+    }
+    assert!(chars.next().is_none(), "String literal not properly closed");
+    Ok(result)
+}
+
+fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
+    let s = lex.slice();
+    let span = lex.span();
+    let source = lex.source();
+    
+    let mut chars = s.chars();
+    chars.next(); // skip opening quote
+    let c = if let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(escaped) = chars.next() {
+                match escaped {
+                    'n' => '\n',
+                    't' => '\t',
+                    '\\' => '\\',
+                    '\'' => '\'',
+                    _ => return Err(LexingError {
+                        src: NamedSource::new("input", source.to_string()),
+                        span: (span.start, span.end - span.start).into(),
+                        kind: LexingErrorKind::InvalidEscapeSequence(escaped),
+                    }),
+                }
+            } else {
+                return Err(LexingError {
+                    src: NamedSource::new("input", source.to_string()),
+                    span: (span.start, span.end - span.start).into(),
+                    kind: LexingErrorKind::UnexpectedCharacter,
+                });
+            }
+        } else {
+            c
+        }
+    } else {
+        return Err(LexingError {
+            src: NamedSource::new("input", source.to_string()),
+            span: (span.start, span.end - span.start).into(),
+            kind: LexingErrorKind::UnexpectedCharacter,
+        });
+    };
+    assert!(chars.next() == Some('\''), "Char literal not properly closed");
+    Ok(c.to_string())
+}
+
 
 /// Implementation 2: Full Source Info
 #[derive(Debug, PartialEq, Clone)]
@@ -70,231 +220,82 @@ pub struct LocatableToken {
     pub loc: SourceLocation,
 }
 
-pub struct FullEmitter;
-impl Emitter for FullEmitter {
-    type Output = LocatableToken;
-    fn emit(&mut self, token: Token, line: usize, col: usize) -> Self::Output {
-        LocatableToken {
-            token,
-            loc: SourceLocation { line, col },
-        }
-    }
-}
+
 
 // --- The Lexer ---
 
-pub struct Lexer<'a, E: Emitter> {
-    input: Peekable<Chars<'a>>,
-    emitter: E,
-    line: usize,
-    col: usize,
+pub struct Lexer<'a> {
+    input: &'a str,
+    origin: SourceCodeOrigin,
 }
 
-impl<'a, E: Emitter> Lexer<'a, E> {
-    pub fn new(input: &'a str, emitter: E) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(input: &'a str, filename: Option<String>) -> Self {
         Lexer {
-            input: input.chars().peekable(),
-            emitter,
-            line: 1,
-            col: 1,
+            input,
+            origin: match filename {
+                Some(name) => SourceCodeOrigin::File(name),
+                None => SourceCodeOrigin::Anon(Arc::new(input.to_string())),
+            },
         }
-    }
-
-    // --- Internal Helpers ---
-
-    fn peek(&mut self) -> Option<char> {
-        self.input.peek().copied()
-    }
-
-    fn next_char(&mut self) -> Option<char> {
-        let c = self.input.next()?;
-        if c == '\n' {
-            self.line += 1;
-            self.col = 1;
-        } else {
-            self.col += 1;
-        }
-        Some(c)
-    }
-
-    fn match_next(&mut self, expected: char) -> bool {
-        if self.peek() == Some(expected) {
-            self.next_char();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn consume_while<F>(&mut self, mut predicate: F) -> String
-    where
-        F: FnMut(char) -> bool,
-    {
-        let mut s = String::new();
-        while let Some(c) = self.peek() {
-            if predicate(c) {
-                s.push(c);
-                self.next_char();
-            } else {
-                break;
-            }
-        }
-        s
     }
 
     // --- Core Logic ---
 
-    pub fn tokenize(&mut self) -> Vec<E::Output> {
+    pub fn finalize_error(&self, lex: &logos::Lexer<Token>, err: LexingError) -> LexingError {
+        LexingError {
+            src: NamedSource::new(
+                match &self.origin {
+                    SourceCodeOrigin::File(name) => name.clone(),
+                    SourceCodeOrigin::Anon(code) => code.as_ref().clone(),
+                },
+                self.input.to_string(),
+            ),
+            span: (lex.span().start, lex.span().end - lex.span().start).into(),
+            kind: err.kind,
+        }
+    }
+
+    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
         let mut tokens = Vec::new();
-
-        while let Some(c) = self.peek() {
-            let (l, c_idx) = (self.line, self.col);
-
-            macro_rules! emit {
-                ($tok:expr) => {{
-                    let val = $tok;
-                    tokens.push(self.emitter.emit(val, l, c_idx))
-                }};
-            }
-            macro_rules! emit_adv {
-                ($tok:expr) => {{
-                    self.next_char();
-                    emit!($tok);
-                }};
-            }
-
-            match c {
-                c if c.is_whitespace() => {
-                    self.next_char();
-                }
-
-                '/' => {
-                    self.next_char();
-                    if self.match_next('/') {
-                        self.consume_while(|c| c != '\n');
+        let mut lexer = Token::lexer(self.input);
+        while let Some(token) = lexer.next() {
+            match token {
+                Ok(t) => tokens.push(t),
+                Err(e) => {
+                    if e.kind == LexingErrorKind::Other {
+                        Err(self.finalize_error(&lexer, e))?;
                     } else {
-                        emit!(Token::Unknown('/'));
-                    }
+                        Err(e)?;
+                    } 
                 }
+            }
+        }
+        Ok(tokens)
+    }
 
-                '{' => emit_adv!(Token::LBrace),
-                '}' => emit_adv!(Token::RBrace),
-                '(' => emit_adv!(Token::LParen),
-                ')' => emit_adv!(Token::RParen),
-                '[' => emit_adv!(Token::LSquare),
-                ']' => emit_adv!(Token::RSquare),
-                ';' => emit_adv!(Token::Semicolon),
-                '=' => emit_adv!(Token::Equals),
-                '<' => emit_adv!(Token::LAngle),
-                '>' => emit_adv!(Token::RAngle),
-                ',' => emit_adv!(Token::Comma),
-
-                ':' => {
-                    self.next_char();
-                    emit!(if self.match_next(':') {
-                        Token::DoubleColon
+    pub fn tokenize_with_locations(&mut self) -> Result<Vec<LocatableToken>> {
+        let mut tokens = Vec::new();
+        let mut lexer = Token::lexer(self.input);
+        while let Some(token) = lexer.next() {
+            match token {
+                Ok(t) => {
+                    let loc = SourceLocation {
+                        span: (lexer.span().start, lexer.span().end - lexer.span().start).into(),
+                        origin: self.origin.clone(),
+                    };
+                    tokens.push(LocatableToken { token: t, loc });
+                }
+                Err(e) => {
+                    if e.kind == LexingErrorKind::Other {
+                        Err(self.finalize_error(&lexer, e))?;
                     } else {
-                        Token::Colon
-                    });
-                }
-
-                '"' => emit!(self.read_string_literal()),
-                '\'' => {
-                    for tok in self.read_char_literal() {
-                        emit!(tok);
-                    }
-                }
-
-                c if c.is_alphabetic() || c == '_' => emit!(self.read_identifier_or_keyword()),
-                c if c.is_ascii_digit() => emit!(self.read_number()),
-
-                _ => emit_adv!(Token::Unknown(c)),
-            }
-        }
-        tokens
-    }
-
-    fn read_string_literal(&mut self) -> Token {
-        self.next_char(); // consume "
-        let mut content = String::new();
-        while let Some(c) = self.peek() {
-            match c {
-                '"' => {
-                    self.next_char();
-                    break;
-                }
-                '\\' => {
-                    self.next_char();
-                    if let Some(nc) = self.next_char() {
-                        content.push(match nc {
-                            'n' => '\n',
-                            't' => '\t',
-                            '\\' => '\\',
-                            '"' => '"',
-                            _ => nc,
-                        });
-                    }
-                }
-                _ => {
-                    content.push(c);
-                    self.next_char();
+                        Err(e)?;
+                    } 
                 }
             }
         }
-        Token::StringLiteral(content)
+        Ok(tokens)
     }
 
-    fn read_char_literal(&mut self) -> Vec<Token> {
-        self.next_char(); // consume '
-        let mut content = String::new();
-        while let Some(c) = self.peek() {
-            match c {
-                '\'' => {
-                    self.next_char();
-                    break;
-                }
-                '\\' => {
-                    self.next_char();
-                    if let Some(nc) = self.next_char() {
-                        content.push(match nc {
-                            'n' => '\n',
-                            't' => '\t',
-                            '\\' => '\\',
-                            '\'' => '\'',
-                            _ => nc,
-                        });
-                    }
-                }
-                _ => {
-                    content.push(c);
-                    self.next_char();
-                }
-            }
-        }
-        let val = content.chars().next().unwrap_or('\0') as u8;
-        vec![Token::IntLiteral(val.to_string()), Token::TypeU8]
-    }
-
-    fn read_number(&mut self) -> Token {
-        Token::IntLiteral(self.consume_while(|c| c.is_ascii_digit()))
-    }
-
-    fn read_identifier_or_keyword(&mut self) -> Token {
-        // Includes ':' to handle std:: intrinsics as single atomic identifiers
-        let ident = self.consume_while(|c| c.is_alphanumeric() || c == '_' || c == ':');
-        match ident.as_str() {
-            "fn" => Token::Fn,
-            "let" => Token::Let,
-            "u8" => Token::TypeU8,
-            "i8" => Token::TypeI8,
-            "u16" => Token::TypeU16,
-            "i16" => Token::TypeI16,
-            "u32" => Token::TypeU32,
-            "i32" => Token::TypeI32,
-            "u64" => Token::TypeU64,
-            "i64" => Token::TypeI64,
-            "str" => Token::TypeStr,
-            _ => Token::Identifier(ident),
-        }
-    }
 }
