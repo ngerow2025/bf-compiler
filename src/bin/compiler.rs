@@ -26,12 +26,12 @@ fn main() -> Result<()> {
     let source_code =
         std::fs::read_to_string(cli.source_file.clone()).expect("Failed to read input file");
     let mut lexer = Lexer::new(&source_code, Some(cli.source_file.clone()));
-    let _tokens = lexer.tokenize_with_locations()?;
+    let tokens = lexer.tokenize_with_locations()?;
+
+    let mut parser = parser::Parser::new(tokens);
+    let ast = parser.parse_program();
 
     /*
-    let mut parser = parser::Parser::new(tokens);
-
-    let ast = parser.parse_program();
     let type_checked = type_annotate_program(ast.clone().unwrap());
 
     let entry_point = type_checked

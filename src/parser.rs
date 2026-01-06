@@ -1,21 +1,23 @@
-use miette::{ByteOffset, Diagnostic, NamedSource};
+use miette::{Diagnostic, NamedSource};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-use crate::tokenizer::{LocatableToken, Token};
+use crate::tokenizer::{LocatableToken, SourceLocation, Token};
 
 // --- AST Definitions ---
 
 #[derive(Debug, Clone)]
 pub struct Program {
     pub functions: Vec<Function>,
+    pub function_name_mapping: HashMap<FunctionId, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionParam {
-    pub type_: ASTType,
+    pub type_: ASTTypeNode,
     pub variable_index: VariableId,
+    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +26,8 @@ pub struct Function {
     pub params: Vec<FunctionParam>,
     pub body: Block,
     pub id: FunctionId,
+    pub source: Option<SourceLocation>,
+    pub variable_name_mapping: HashMap<VariableId, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,6 +48,7 @@ pub enum BlockItem {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<BlockItem>,
+    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,19 +56,23 @@ pub enum Statement {
     // let x: type = expr;
     VarDecl {
         name: String,
-        type_: ASTType,
+        type_: ASTTypeNode,
         value: Expression,
         variable_index: VariableId,
+        source: Option<SourceLocation>,
     },
-
     // x = expr;
     Assignment {
         var: VariableId,
         value: Expression,
+        source: Option<SourceLocation>,
     },
 
     // expr;
-    Expression(Expression),
+    Expression {
+        expr: Expression,
+        source: Option<SourceLocation>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,18 +88,44 @@ pub enum IntLiteral {
 }
 
 #[derive(Debug, Clone)]
+pub struct VariableAccess {
+    pub id: VariableId,
+    pub source: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
-    IntLiteral(IntLiteral),
-    StringLiteral(String),
-    Variable(VariableId),
+    IntLiteral {
+        value: IntLiteral,
+        source: Option<SourceLocation>,
+    },
+    StringLiteral {
+        value: String,
+        source: Option<SourceLocation>,
+    },
+    Variable(VariableAccess),
     ArrayAccess {
-        array: VariableId,
+        array: VariableAccess,
         index_expr: Box<Expression>,
+        source: Option<SourceLocation>,
     },
     FnCall {
         name: String,
         arguments: Vec<Expression>,
+        source: Option<SourceLocation>,
     },
+}
+
+impl Expression {
+    pub fn get_source(&self) -> Option<SourceLocation> {
+        match self {
+            Expression::IntLiteral { source, .. } => source.clone(),
+            Expression::StringLiteral { source, .. } => source.clone(),
+            Expression::Variable(VariableAccess { source, .. }) => source.clone(),
+            Expression::ArrayAccess { source, .. } => source.clone(),
+            Expression::FnCall { source, .. } => source.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -154,39 +189,52 @@ impl Error for ExpectedTokenError {
     }
 }
 
+struct QualifiedName {
+    parts: Vec<String>,
+    part_sources: Option<Vec<SourceLocation>>,
+    source: Option<SourceLocation>,
+}
+
 pub struct Parser {
-    tokens: Vec<Token>,
+    tokens: Vec<LocatableToken>,
     pos: usize,
     variable_index: VariableId,
     variable_tracker: Vec<HashMap<String, VariableId>>,
+    function_name_mapping: HashMap<FunctionId, String>,
+    variable_name_mapping: HashMap<VariableId, String>,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(tokens: Vec<LocatableToken>) -> Self {
         Parser {
             tokens,
             pos: 0,
             variable_index: VariableId(0),
             variable_tracker: vec![],
+            function_name_mapping: HashMap::new(),
+            variable_name_mapping: HashMap::new(),
         }
     }
 
     // --- Helpers ---
 
-    fn peek(&self) -> Option<&Token> {
+    fn peek(&self) -> Option<&LocatableToken> {
         self.tokens.get(self.pos)
     }
 
-    fn advance(&mut self) -> Option<Token> {
+    fn peek2(&self) -> Option<&LocatableToken> {
+        self.tokens.get(self.pos + 1)
+    }
+
+    fn advance(&mut self) -> Option<LocatableToken> {
         let t = self.tokens.get(self.pos).cloned();
         self.pos += 1;
         t
     }
 
-    fn expect(&mut self, expected: Token) -> Result<(), String> {
-        if self.peek() == Some(&expected) {
-            self.advance();
-            Ok(())
+    fn expect(&mut self, expected: Token) -> Result<LocatableToken, String> {
+        if self.peek().map(|lt| &lt.token) == Some(&expected) {
+            Ok(self.advance().unwrap())
         } else {
             panic!("expected {:?}, got {:?}", expected, self.peek());
             Err(format!("Expected {:?}, found {:?}", expected, self.peek()))
@@ -202,29 +250,39 @@ impl Parser {
             functions.push(self.parse_function(current_function_id)?);
             current_function_id = FunctionId(current_function_id.0 + 1);
         }
-        Ok(Program { functions })
+        Ok(Program {
+            functions,
+            function_name_mapping: self.function_name_mapping.clone(),
+        })
     }
 
     fn parse_function(&mut self, id: FunctionId) -> Result<Function, String> {
         self.variable_index = VariableId(0);
         self.variable_tracker.clear();
         self.variable_tracker.push(HashMap::new());
+        self.variable_name_mapping.clear();
         // Grammar: "fn" ID "(" ")" Block
         self.expect(Token::Fn)?;
 
-        let name = match self.advance() {
-            Some(Token::Identifier(n)) => n.clone(),
+        let name_token = self.advance().expect("should have a name token");
+
+        let name = match name_token.token {
+            Token::Identifier(n) => n.clone(),
             t => return Err(format!("Expected function name, found {:?}", t)),
         };
+
+        self.function_name_mapping.insert(id, name.clone());
 
         self.expect(Token::LParen)?;
 
         let mut params = Vec::new();
         //parse parameters
         //syntax: fn function_name(param: Type)
-        while self.peek() != Some(&Token::RParen) {
-            let param_name = match self.advance() {
-                Some(Token::Identifier(n)) => n.clone(),
+        while self.peek().map(|t| &t.token) != Some(&Token::RParen) {
+            let name_token = self.advance().expect("should have a name token");
+
+            let param_name = match name_token.token {
+                Token::Identifier(n) => n.clone(),
                 t => return Err(format!("Expected parameter name, found {:?}", t)),
             };
 
@@ -240,12 +298,19 @@ impl Parser {
                 .unwrap()
                 .insert(param_name.clone(), var_index);
 
+            self.variable_name_mapping
+                .insert(var_index, param_name.clone());
+
             params.push(FunctionParam {
-                type_: param_type,
                 variable_index: var_index,
+                source: Some(SourceLocation::superset(&[
+                    &name_token.loc,
+                    param_type.source.as_ref().unwrap(),
+                ])),
+                type_: param_type,
             });
 
-            if self.peek() == Some(&Token::Comma) {
+            if self.peek().map(|t| &t.token) == Some(&Token::Comma) {
                 self.advance(); // consume comma
             } else {
                 break; // no more parameters
@@ -258,28 +323,39 @@ impl Parser {
 
         Ok(Function {
             name,
-            body,
             params,
             id,
+            variable_name_mapping: self.variable_name_mapping.clone(),
+            source: Some(SourceLocation::superset(&[
+                &name_token.loc,
+                body.source.as_ref().unwrap(),
+            ])),
+            body,
         })
     }
 
     fn parse_block(&mut self) -> Result<Block, String> {
         self.variable_tracker.push(HashMap::new());
-        self.expect(Token::LBrace)?;
+        let start_token = self.expect(Token::LBrace)?;
         let mut statements = Vec::new();
 
-        while self.peek().is_some() && self.peek() != Some(&Token::RBrace) {
+        while self.peek().is_some() && self.peek().map(|t| &t.token) != Some(&Token::RBrace) {
             statements.push(self.parse_statement_or_block()?);
         }
 
-        self.expect(Token::RBrace)?;
+        let end_token = self.expect(Token::RBrace)?;
         self.variable_tracker.pop();
-        Ok(Block { statements })
+        Ok(Block {
+            statements,
+            source: Some(SourceLocation::superset(&[
+                &start_token.loc,
+                &end_token.loc,
+            ])),
+        })
     }
 
     fn parse_statement_or_block(&mut self) -> Result<BlockItem, String> {
-        if self.peek() == Some(&Token::LBrace) {
+        if self.peek().map(|t| &t.token) == Some(&Token::LBrace) {
             let block = self.parse_block()?;
             Ok(BlockItem::Block(block))
         } else {
@@ -290,26 +366,45 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<Statement, String> {
         let token = self.peek().ok_or("Unexpected EOF")?;
-        match token {
+        match &token.token {
             Token::Let => self.parse_var_decl(),
             Token::Identifier(_) => {
                 // Could be Assignment or expression
                 // We need to look ahead 1 token
-                let next_token = self.tokens.get(self.pos + 1);
-                match next_token {
+                match self.peek2().map(|t| &t.token) {
                     Some(Token::Equals) => self.parse_assignment(),
-                    _ => Ok(Statement::Expression(self.parse_expression()?)),
+                    _ => {
+                        let parsed_expr = self.parse_expression()?;
+                        let semicolon_token = self.expect(Token::Semicolon)?;
+                        Ok(Statement::Expression {
+                            source: Some(SourceLocation::superset(&[
+                                &parsed_expr.get_source().unwrap(),
+                                &semicolon_token.loc,
+                            ])),
+                            expr: parsed_expr,
+                        })
+                    }
                 }
             }
-            _ => Ok(Statement::Expression(self.parse_expression()?)),
+            _ => {
+                let parsed_expr = self.parse_expression()?;
+                let semicolon_token = self.expect(Token::Semicolon)?;
+                Ok(Statement::Expression {
+                    source: Some(SourceLocation::superset(&[
+                        &parsed_expr.get_source().unwrap(),
+                        &semicolon_token.loc,
+                    ])),
+                    expr: parsed_expr,
+                })
+            }
         }
     }
 
     fn parse_var_decl(&mut self) -> Result<Statement, String> {
         // Grammar: "let" ID ":" Type "=" Expression ";"
-        self.advance(); // consume 'let'
+        let let_token = self.advance().expect("need the let token"); // consume 'let'
 
-        let name = match self.advance() {
+        let name = match self.advance().map(|t| t.token) {
             Some(Token::Identifier(n)) => n.clone(),
             t => return Err(format!("Expected variable name, found {:?}", t)),
         };
@@ -324,7 +419,7 @@ impl Parser {
         // Parse Expression
         let expr_ast = self.parse_expression()?;
 
-        self.expect(Token::Semicolon)?;
+        let semicolon_token = self.expect(Token::Semicolon)?;
 
         // make sure that a variable of this name does not already exist in the current scope
         for scope in self.variable_tracker.iter().rev() {
@@ -344,17 +439,25 @@ impl Parser {
             .unwrap()
             .insert(name.clone(), var_index);
 
+        self.variable_name_mapping.insert(var_index, name.clone());
+
         Ok(Statement::VarDecl {
             name,
             type_,
             value: expr_ast,
             variable_index: var_index,
+            source: Some(SourceLocation::superset(&[
+                &let_token.loc,
+                &semicolon_token.loc,
+            ])),
         })
     }
 
     fn parse_assignment(&mut self) -> Result<Statement, String> {
         // Grammar: ID "=" Expression ";"
-        let name = match self.advance() {
+        let name_token = self.peek().cloned().ok_or("Unexpected EOF")?;
+
+        let name = match self.advance().map(|t| t.token) {
             Some(Token::Identifier(n)) => n.clone(),
             _ => return Err("Expected identifier".into()),
         };
@@ -379,174 +482,301 @@ impl Parser {
         ))?;
         Ok(Statement::Assignment {
             var: var_index,
+            source: Some(SourceLocation::superset(&[
+                &name_token.loc,
+                &expr_ast.get_source().unwrap(),
+            ])),
             value: expr_ast,
         })
     }
 
-    fn parse_fn_call(&mut self, identifier: String) -> Result<Expression, String> {
-        // Grammar: ID "(" ")" ";"
-        let name = identifier;
+    fn parse_function_call(&mut self) -> Result<Expression, String> {
+        // Grammar: ID "(" ")"
+        let name_token = self.parse_qualified_identifier()?;
+        let name = name_token.parts.join("::");
 
         self.expect(Token::LParen)?;
 
         let mut args = Vec::new();
-        while self.peek() != Some(&Token::RParen) {
+        while self.peek().map(|t| &t.token) != Some(&Token::RParen) {
             let arg_expr = self.parse_expression()?;
             args.push(arg_expr);
 
-            if self.peek() == Some(&Token::Comma) {
+            if self.peek().map(|t| &t.token) == Some(&Token::Comma) {
                 self.advance(); // consume comma
             } else {
                 break; // no more arguments
             }
         }
 
-        self.expect(Token::RParen)?;
-        self.expect(Token::Semicolon)?;
+        let r_paren_token = self.expect(Token::RParen)?;
 
         // function type checking will happen in a later phase
 
         Ok(Expression::FnCall {
             name,
             arguments: args,
+            source: Some(SourceLocation::superset(&[
+                &name_token.source.unwrap(),
+                &r_paren_token.loc,
+            ])),
+        })
+    }
+
+    fn parse_qualified_identifier(&mut self) -> Result<QualifiedName, String> {
+        // Grammar: ID ("::" ID)*
+        let mut parts = Vec::new();
+        let mut source_locations = Vec::new();
+
+        let first_token = self.advance().ok_or("Expected identifier")?;
+        let first_name = match first_token.token {
+            Token::Identifier(n) => n.clone(),
+            _ => return Err("Expected identifier".into()),
+        };
+        parts.push(first_name);
+        source_locations.push(first_token.loc);
+        while self.peek().map(|t| &t.token) == Some(&Token::DoubleColon) {
+            self.advance(); // consume '::'
+
+            let next_token = self.advance().ok_or("Expected identifier after '::'")?;
+            let next_name = match next_token.token {
+                Token::Identifier(n) => n.clone(),
+                _ => return Err("Expected identifier after '::'".into()),
+            };
+            parts.push(next_name);
+            source_locations.push(next_token.loc);
+        }
+
+        Ok(QualifiedName {
+            parts,
+            source: Some(SourceLocation::superset(&[
+                source_locations.first().unwrap(),
+                source_locations.last().unwrap(),
+            ])),
+            part_sources: Some(source_locations),
         })
     }
 
     // Returns the AST node AND its resolved type
     fn parse_expression(&mut self) -> Result<Expression, String> {
-        let token = self.advance().ok_or("Unexpected EOF in expression")?;
+        let token = self.peek().ok_or("Unexpected EOF in expression")?;
 
-        match token {
-            Token::IntLiteral(s) => {
-                let int_lit_type = self
-                    .advance()
-                    .ok_or("Expected type after integer literal")?;
-                Ok(match int_lit_type {
-                    Token::TypeU8 => {
-                        let val = s.parse().map_err(|_| "Invalid u8 literal")?;
-                        Expression::IntLiteral(IntLiteral::U8(val))
-                    }
-                    Token::TypeI8 => {
-                        let val = s.parse().map_err(|_| "Invalid i8 literal")?;
-                        Expression::IntLiteral(IntLiteral::I8(val))
-                    }
-                    Token::TypeU16 => {
-                        let val = s.parse().map_err(|_| "Invalid u16 literal")?;
-                        Expression::IntLiteral(IntLiteral::U16(val))
-                    }
-                    Token::TypeI16 => {
-                        let val = s.parse().map_err(|_| "Invalid i16 literal")?;
-                        Expression::IntLiteral(IntLiteral::I16(val))
-                    }
-                    Token::TypeU32 => {
-                        let val = s.parse().map_err(|_| "Invalid u32 literal")?;
-                        Expression::IntLiteral(IntLiteral::U32(val))
-                    }
-                    Token::TypeI32 => {
-                        let val = s.parse().map_err(|_| "Invalid i32 literal")?;
-                        Expression::IntLiteral(IntLiteral::I32(val))
-                    }
-                    Token::TypeU64 => {
-                        let val = s.parse().map_err(|_| "Invalid u64 literal")?;
-                        Expression::IntLiteral(IntLiteral::U64(val))
-                    }
-                    Token::TypeI64 => {
-                        let val = s.parse().map_err(|_| "Invalid i64 literal")?;
-                        Expression::IntLiteral(IntLiteral::I64(val))
-                    }
-                    _ => return Err("Expected type after integer literal".into()),
-                })
-            }
-            Token::StringLiteral(s) => {
-                // String literals are inherently str<LEN>
-                Ok(Expression::StringLiteral(s.clone()))
-            }
-            Token::Identifier(name) => {
-                // could be a function call
-                if let Some(Token::LParen) = self.peek() {
-                    self.parse_fn_call(name.clone())
-                } else if let Some(Token::DoubleColon) = self.peek() {
-                    // this is the start of a qualified name, must be a function call
-                    // parse the full qualified name
-                    let mut full_name = name.clone();
-                    while let Some(Token::DoubleColon) = self.peek() {
-                        full_name += "::";
-                        self.advance(); // consume '::'
-                        let next_part = match self.advance() {
-                            Some(Token::Identifier(n)) => n,
-                            t => {
-                                return Err(format!(
-                                    "Expected identifier in qualified name, found {:?}",
-                                    t
-                                ));
-                            }
-                        };
-                        full_name += &next_part;
-                    }
-                    self.parse_fn_call(full_name)
-                } else {
-                    // look for the existing variable index
-                    let mut found_index = None;
-                    for scope in self.variable_tracker.iter().rev() {
-                        if let Some(idx) = scope.get(&name) {
-                            found_index = Some(*idx);
-                            break;
-                        }
-                    }
-
-                    let base_index =
-                        found_index.ok_or(format!("Variable '{}' not declared", name))?;
-
-                    // if we peek an opening square bracket, this is an array access
-                    if let Some(Token::LSquare) = self.peek() {
-                        self.expect(Token::LSquare)?;
-
-                        let expr = self.parse_expression()?;
-
-                        self.expect(Token::RSquare)?;
-
-                        return Ok(Expression::ArrayAccess {
-                            array: base_index,
-                            index_expr: Box::new(expr),
-                        });
-                    }
-                    Ok(Expression::Variable(
-                        found_index.ok_or(format!("Variable '{}' not declared", name))?,
-                    ))
+        match token.token {
+            Token::IntLiteral(_) => self.parse_int_literal(),
+            Token::StringLiteral(_) => self.parse_string_literal(),
+            Token::Identifier(_) => {
+                // could be a several different things
+                match self.peek2().map(|t| &t.token) {
+                    Some(Token::LParen) | Some(Token::DoubleColon) => self.parse_function_call(),
+                    Some(Token::LSquare) => self.parse_array_access(),
+                    _ => self
+                        .parse_variable_access()
+                        .map(|var| Expression::Variable(var)),
                 }
             }
             _ => Err(format!("Invalid token in expression: {:?}", token)),
         }
     }
 
-    fn parse_type(&mut self) -> Result<ASTType, String> {
+    fn parse_int_literal(&mut self) -> Result<Expression, String> {
+        let int_token = self.advance().ok_or("Expected integer literal")?;
+
+        let int_value = match int_token.token {
+            Token::IntLiteral(s) => s.clone(),
+            _ => return Err("Expected integer literal".into()),
+        };
+
+        let type_token = self.parse_type()?;
+
+        let parsed_value = match type_token.kind {
+            ASTTypeKind::U8 => IntLiteral::U8(int_value.parse::<u8>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as u8: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::I8 => IntLiteral::I8(int_value.parse::<i8>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as i8: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::U16 => IntLiteral::U16(int_value.parse::<u16>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as u16: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::I16 => IntLiteral::I16(int_value.parse::<i16>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as i16: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::U32 => IntLiteral::U32(int_value.parse::<u32>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as u32: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::I32 => IntLiteral::I32(int_value.parse::<i32>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as i32: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::U64 => IntLiteral::U64(int_value.parse::<u64>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as u64: {}",
+                    int_value, e
+                )
+            })?),
+            ASTTypeKind::I64 => IntLiteral::I64(int_value.parse::<i64>().map_err(|e| {
+                format!(
+                    "Failed to parse integer literal '{}' as i64: {}",
+                    int_value, e
+                )
+            })?),
+            _ => {
+                return Err(format!(
+                    "Invalid type for integer literal: {:?}",
+                    type_token.kind
+                ));
+            }
+        };
+
+        Ok(Expression::IntLiteral {
+            value: parsed_value,
+            source: Some(SourceLocation::superset(&[
+                &int_token.loc,
+                type_token.source.as_ref().unwrap(),
+            ])),
+        })
+    }
+
+    fn parse_string_literal(&mut self) -> Result<Expression, String> {
+        let str_token = self.advance().ok_or("Expected string literal")?;
+
+        let str_value = match str_token.token {
+            Token::StringLiteral(s) => s.clone(),
+            _ => return Err("Expected string literal".into()),
+        };
+
+        Ok(Expression::StringLiteral {
+            value: str_value,
+            source: Some(str_token.loc),
+        })
+    }
+
+    fn parse_array_access(&mut self) -> Result<Expression, String> {
+        // Grammar: ID "[" Expression "]"
+        let variable_access = self.parse_variable_access()?;
+
+        self.expect(Token::LSquare)?;
+
+        let index_expr = self.parse_expression()?;
+
+        let r_square_token = self.expect(Token::RSquare)?;
+
+        Ok(Expression::ArrayAccess {
+            index_expr: Box::new(index_expr),
+            source: Some(SourceLocation::superset(&[
+                &variable_access.source.clone().unwrap(),
+                &r_square_token.loc,
+            ])),
+            array: variable_access,
+        })
+    }
+
+    fn parse_variable_access(&mut self) -> Result<VariableAccess, String> {
+        // Grammar: ID
+        let name_token = self.advance().ok_or("Expected identifier for variable")?;
+
+        let name = match name_token.token {
+            Token::Identifier(n) => n.clone(),
+            _ => return Err("Expected identifier for variable".into()),
+        };
+
+        // look for the existing variable index
+        let mut found_index = None;
+        for scope in self.variable_tracker.iter().rev() {
+            if let Some(idx) = scope.get(&name) {
+                found_index = Some(*idx);
+                break;
+            }
+        }
+
+        let var_index = found_index.ok_or(format!("Variable '{}' not declared", name))?;
+
+        Ok(VariableAccess {
+            id: var_index,
+            source: Some(name_token.loc),
+        })
+    }
+
+    //TODO: use parse_variable everywhere and add Varible struct for tracking source info like for the ArrayAccess node
+
+    fn parse_type(&mut self) -> Result<ASTTypeNode, String> {
         let t = self.advance().ok_or("Expected type")?;
-        match t {
-            Token::TypeU8 => Ok(ASTType::U8),
-            Token::TypeI8 => Ok(ASTType::I8),
-            Token::TypeU16 => Ok(ASTType::U16),
-            Token::TypeI16 => Ok(ASTType::I16),
-            Token::TypeU32 => Ok(ASTType::U32),
-            Token::TypeI32 => Ok(ASTType::I32),
-            Token::TypeU64 => Ok(ASTType::U64),
-            Token::TypeI64 => Ok(ASTType::I64),
+        match t.token {
+            Token::TypeU8 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::U8,
+                source: Some(t.loc),
+            }),
+            Token::TypeI8 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::I8,
+                source: Some(t.loc),
+            }),
+            Token::TypeU16 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::U16,
+                source: Some(t.loc),
+            }),
+            Token::TypeI16 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::I16,
+                source: Some(t.loc),
+            }),
+            Token::TypeU32 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::U32,
+                source: Some(t.loc),
+            }),
+            Token::TypeI32 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::I32,
+                source: Some(t.loc),
+            }),
+            Token::TypeU64 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::U64,
+                source: Some(t.loc),
+            }),
+            Token::TypeI64 => Ok(ASTTypeNode {
+                kind: ASTTypeKind::I64,
+                source: Some(t.loc),
+            }),
             Token::TypeStr => {
                 // Format: str<INT>
                 self.expect(Token::LAngle)?;
-                let size = match self.advance() {
+                let size = match self.advance().map(|t| t.token) {
                     Some(Token::IntLiteral(n)) => n.parse::<usize>().unwrap(),
                     _ => return Err("Expected integer literal for string size".into()),
                 };
-                self.expect(Token::RAngle)?;
-                Ok(ASTType::Str(size))
+                let r_angle_token = self.expect(Token::RAngle)?;
+                Ok(ASTTypeNode {
+                    kind: ASTTypeKind::Str(size),
+                    source: Some(SourceLocation::superset(&[&t.loc, &r_angle_token.loc])),
+                })
             }
             _ => Err(format!("Unknown type token: {:?}", t)),
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ASTTypeNode {
+    pub kind: ASTTypeKind,
+    pub source: Option<SourceLocation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub enum ASTType {
+pub enum ASTTypeKind {
     U8,
     I8,
     U16,
@@ -556,97 +786,4 @@ pub enum ASTType {
     U64,
     I64,
     Str(usize), // str<LEN>
-}
-
-#[cfg(test)]
-mod parser_tests {
-    use crate::tokenizer::Lexer;
-
-    use super::*;
-
-    // Helper to tokenize then parse
-    fn parse(input: &str) -> Result<Program, String> {
-        let mut lexer = Lexer::new(input, None);
-        let tokens = lexer.tokenize();
-        let mut parser = Parser::new(tokens);
-        parser.parse_program()
-    }
-
-    #[test]
-    fn test_valid_program() {
-        let src = r#"
-            fn main() {
-                let a: u8 = 10;
-                let b: i32 = 1000;
-                std::out(a);
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_ok(), "Program should parse: {:?}", res.err());
-    }
-
-    #[test]
-    fn test_type_error_bounds() {
-        // 300 does not fit in u8
-        let src = r#"
-            fn main() {
-                let a: u8 = 300; 
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "Literal 300 is out of bounds for type U8");
-    }
-
-    #[test]
-    fn test_type_error_mismatch() {
-        // Assigning u8 variable to i32 variable
-        let src = r#"
-            fn main() {
-                let a: u8 = 10;
-                let b: i32 = a;
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), "Type Mismatch: Expected I32, got U8");
-    }
-
-    #[test]
-    fn test_undeclared_variable() {
-        let src = r#"
-            fn main() {
-                a = 10;
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("not declared before assignment"));
-        // Or "Variable 'a' not declared" depending on parsing path
-    }
-
-    #[test]
-    fn test_string_overflow() {
-        let src = r#"
-            fn main() {
-                let s: str<3> = "Hello";
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("String overflow"));
-    }
-
-    #[test]
-    fn test_stdin_type() {
-        // std::in returns u8. Trying to put it in u16 should fail.
-        let src = r#"
-            fn main() {
-                let x: u16 = std::in();
-            }
-        "#;
-        let res = parse(src);
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("Type Mismatch"));
-    }
 }

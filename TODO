@@ -33,3 +33,5 @@
 
 - Write custom brainfuck runner that is able to also take in debug information from the compiled code to allow step through debugging of brainfuck programs with different stage outputs tracked
 - Write a sort of brainfuck profiler that tracks instructions executed
+
+- change all applicable unwraps/expects to proper error handling

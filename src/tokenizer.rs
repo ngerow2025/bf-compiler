@@ -15,6 +15,20 @@ pub struct SourceLocation {
     pub origin: SourceCodeOrigin,
 }
 
+impl SourceLocation {
+    pub fn superset(elements: &[&SourceLocation]) -> SourceLocation {
+        let first = elements.first().expect("No elements provided");
+        let last = elements.last().expect("No elements provided");
+        SourceLocation {
+            span: SourceSpan::new(
+                first.span.offset().into(),
+                last.span.offset() + last.span.len() - first.span.offset(),
+            ),
+            origin: first.origin.clone(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum SourceCodeOrigin {
     File(String),      //String contains the file path
