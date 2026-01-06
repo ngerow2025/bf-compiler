@@ -26,6 +26,9 @@ pub enum LexingErrorKind {
     #[error("Invalid escape sequence: \\{0}")]
     InvalidEscapeSequence(char),
     #[error("Invalid character literal: {0}")]
+    #[diagnostic(help(
+        "Character literals must be a single ASCII character enclosed in single quotes"
+    ))]
     InvalidCharLiteral(char),
     #[error("Unexpected character encountered")]
     UnexpectedCharacter,
@@ -45,6 +48,13 @@ pub struct LexingError {
     // The specific error variant
     #[diagnostic(transparent)]
     pub kind: LexingErrorKind,
+}
+
+#[derive(Debug, Diagnostic, PartialEq, Clone, Error)]
+#[error("Lexing pass failed with {} error(s)", errors.len())]
+pub struct LexingErrorCollection {
+    #[related]
+    pub errors: Vec<LexingError>,
 }
 
 impl Default for LexingError {
@@ -71,7 +81,11 @@ impl std::error::Error for LexingError {
 
 #[derive(Debug, PartialEq, Clone, Logos)]
 #[logos(skip r"[ \t\n\r]+")]
-#[logos(error = LexingError)]
+#[logos(error(LexingError, callback = |lex| LexingError {
+    src: NamedSource::new("input", lex.source().to_string()),
+    span: (lex.span().start, lex.span().end - lex.span().start).into(),
+    kind: LexingErrorKind::UnexpectedCharacter,
+}))]
 pub enum Token {
     // Keywords
     #[token("fn")]
@@ -132,7 +146,7 @@ pub enum Token {
     #[regex(r#""(?:\\.|[^"\\])*""#, |lex| parse_string(lex))]
     StringLiteral(String),
     #[regex(r#"'(?:\\.|[^'\\])'"#, |lex| parse_char(lex))]
-    CharLiteral(String),
+    CharLiteral(char),
 }
 
 fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
@@ -171,7 +185,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
     Ok(result)
 }
 
-fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
+fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<char, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
@@ -202,7 +216,15 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
                 });
             }
         } else {
-            c
+            if !c.is_ascii() {
+                return Err(LexingError {
+                    src: NamedSource::new("input", source.to_string()),
+                    span: (span.start, span.end - span.start).into(),
+                    kind: LexingErrorKind::InvalidCharLiteral(c),
+                });
+            } else {
+                return Ok(c);
+            }
         }
     } else {
         return Err(LexingError {
@@ -215,7 +237,7 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
         chars.next() == Some('\''),
         "Char literal not properly closed"
     );
-    Ok(c.to_string())
+    Ok(c)
 }
 
 /// Implementation 2: Full Source Info
@@ -262,24 +284,30 @@ impl<'a> Lexer<'a> {
     pub fn tokenize(&mut self) -> Result<Vec<Token>> {
         let mut tokens = Vec::new();
         let mut lexer = Token::lexer(self.input);
+        let mut errors = Vec::new();
         while let Some(token) = lexer.next() {
             match token {
                 Ok(t) => tokens.push(t),
                 Err(e) => {
-                    if e.kind == LexingErrorKind::Other {
-                        Err(self.finalize_error(&lexer, e))?;
+                    errors.push(if e.kind == LexingErrorKind::Other {
+                        self.finalize_error(&lexer, e)
                     } else {
-                        Err(e)?;
-                    }
+                        e
+                    });
                 }
             }
         }
-        Ok(tokens)
+        match errors.len() {
+            0 => Ok(tokens),
+            1 => Err(errors.remove(0).into()),
+            _ => Err(LexingErrorCollection { errors }.into()),
+        }
     }
 
     pub fn tokenize_with_locations(&mut self) -> Result<Vec<LocatableToken>> {
         let mut tokens = Vec::new();
         let mut lexer = Token::lexer(self.input);
+        let mut errors = Vec::new();
         while let Some(token) = lexer.next() {
             match token {
                 Ok(t) => {
@@ -290,14 +318,18 @@ impl<'a> Lexer<'a> {
                     tokens.push(LocatableToken { token: t, loc });
                 }
                 Err(e) => {
-                    if e.kind == LexingErrorKind::Other {
-                        Err(self.finalize_error(&lexer, e))?;
+                    errors.push(if e.kind == LexingErrorKind::Other {
+                        self.finalize_error(&lexer, e)
                     } else {
-                        Err(e)?;
-                    }
+                        e
+                    });
                 }
             }
         }
-        Ok(tokens)
+        match errors.len() {
+            0 => Ok(tokens),
+            1 => Err(errors.remove(0).into()),
+            _ => Err(LexingErrorCollection { errors }.into()),
+        }
     }
 }

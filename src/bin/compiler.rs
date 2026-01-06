@@ -26,8 +26,11 @@ fn main() -> Result<()> {
     let source_code =
         std::fs::read_to_string(cli.source_file.clone()).expect("Failed to read input file");
     let mut lexer = Lexer::new(&source_code, Some(cli.source_file.clone()));
-    let tokens = lexer.tokenize_with_locations()?;
+    let _tokens = lexer.tokenize_with_locations()?;
+
+    /*
     let mut parser = parser::Parser::new(tokens);
+
     let ast = parser.parse_program();
     let type_checked = type_annotate_program(ast.clone().unwrap());
 
@@ -84,6 +87,9 @@ fn main() -> Result<()> {
         .collect::<String>();
     std::fs::write(&output_file, bf_code_string).expect("Failed to write output file");
     println!("Generated Brainfuck code written to {}", output_file);
+
+
+    */
 
     Ok(())
 }
