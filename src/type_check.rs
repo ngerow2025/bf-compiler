@@ -2,9 +2,10 @@ use core::panic;
 use std::collections::HashMap;
 
 use crate::parser::{
-    ASTType, Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program, Statement,
-    VariableId,
+    ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program,
+    Statement, VariableAccess, VariableId,
 };
+use crate::tokenizer::SourceLocation;
 
 #[derive(Debug)]
 pub struct TypedProgram {
@@ -18,17 +19,20 @@ pub struct TypedFunction {
     pub body: TypedBlock,
     pub variable_map: HashMap<VariableId, Type>, // this maps variable ids to their types
     pub id: FunctionId,
+    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
 pub struct TypedFunctionParam {
     pub type_: Type,
     pub variable_index: VariableId,
+    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
 pub struct TypedBlock {
     pub statements: Vec<TypedBlockItem>,
+    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
@@ -44,16 +48,19 @@ pub enum TypedStatement {
         var: VariableId,
         type_: Type,
         value: TypedExpression,
+        source: Option<SourceLocation>,
     },
 
     // x = expr;
     Assignment {
         var: VariableId,
         value: TypedExpression,
+        source: Option<SourceLocation>,
     },
-
-    // expr;
-    Expression(TypedExpression),
+    Expression {
+        expr: TypedExpression,
+        source: Option<SourceLocation>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -61,24 +68,29 @@ pub enum TypedExpression {
     IntLiteral {
         int_literal: IntLiteral,
         type_: Type,
+        source: Option<SourceLocation>,
     },
     StringLiteral {
         string_literal: String,
         type_: Type,
+        source: Option<SourceLocation>,
     },
     Variable {
         variable: VariableId,
         type_: Type,
+        source: Option<SourceLocation>,
     },
     FnCall {
         function: FunctionId,
         arguments: Vec<TypedExpression>,
         type_: Type,
+        source: Option<SourceLocation>,
     },
     ArrayAccess {
         array: VariableId,
         index: Box<TypedExpression>,
         type_: Type,
+        source: Option<SourceLocation>,
     },
 }
 
@@ -90,6 +102,16 @@ impl TypedExpression {
             TypedExpression::Variable { type_, .. } => *type_,
             TypedExpression::FnCall { type_, .. } => *type_,
             TypedExpression::ArrayAccess { type_, .. } => *type_,
+        }
+    }
+
+    pub fn get_source(&self) -> Option<SourceLocation> {
+        match self {
+            TypedExpression::IntLiteral { source, .. } => source.clone(),
+            TypedExpression::StringLiteral { source, .. } => source.clone(),
+            TypedExpression::Variable { source, .. } => source.clone(),
+            TypedExpression::FnCall { source, .. } => source.clone(),
+            TypedExpression::ArrayAccess { source, .. } => source.clone(),
         }
     }
 }
@@ -124,18 +146,18 @@ impl Type {
     }
 }
 
-impl From<ASTType> for Type {
-    fn from(ast_type: ASTType) -> Self {
+impl From<ASTTypeKind> for Type {
+    fn from(ast_type: ASTTypeKind) -> Self {
         match ast_type {
-            ASTType::U8 => Type::U8,
-            ASTType::I8 => Type::I8,
-            ASTType::U16 => Type::U16,
-            ASTType::I16 => Type::I16,
-            ASTType::U32 => Type::U32,
-            ASTType::I32 => Type::I32,
-            ASTType::U64 => Type::U64,
-            ASTType::I64 => Type::I64,
-            ASTType::Str(len) => Type::Str(len),
+            ASTTypeKind::U8 => Type::U8,
+            ASTTypeKind::I8 => Type::I8,
+            ASTTypeKind::U16 => Type::U16,
+            ASTTypeKind::I16 => Type::I16,
+            ASTTypeKind::U32 => Type::U32,
+            ASTTypeKind::I32 => Type::I32,
+            ASTTypeKind::U64 => Type::U64,
+            ASTTypeKind::I64 => Type::I64,
+            ASTTypeKind::Str(len) => Type::Str(len),
         }
     }
 }
@@ -157,7 +179,7 @@ pub fn type_annotate_program(ast_program: Program) -> TypedProgram {
                 param_types: function
                     .params
                     .iter()
-                    .map(|p| Type::from(p.type_))
+                    .map(|p| Type::from(p.type_.kind))
                     .collect(),
                 return_type: Type::Void, // Placeholder, assuming void return type for now
             },
@@ -191,18 +213,13 @@ pub fn type_annotate_program(ast_program: Program) -> TypedProgram {
         },
     );
 
-    let mut reversed_function_name_map = HashMap::new();
-    for (function_name, function_id) in function_name_map.clone() {
-        reversed_function_name_map.insert(function_id, function_name);
-    }
-
     TypedProgram {
         functions: ast_program
             .functions
             .into_iter()
             .map(|f| type_annotate_function(f, &function_name_map, &function_signature_map))
             .collect(),
-        function_name_mapping: reversed_function_name_map,
+        function_name_mapping: ast_program.function_name_mapping,
     }
 }
 
@@ -214,15 +231,16 @@ fn type_annotate_function(
     let mut variable_type_map = HashMap::new();
 
     for param in &ast_function.params {
-        variable_type_map.insert(param.variable_index, Type::from(param.type_));
+        variable_type_map.insert(param.variable_index, Type::from(param.type_.kind));
     }
 
     let typed_function_params = ast_function
         .params
-        .iter()
+        .into_iter()
         .map(|p| TypedFunctionParam {
-            type_: Type::from(p.type_),
+            type_: Type::from(p.type_.kind),
             variable_index: p.variable_index,
+            source: p.source,
         })
         .collect::<Vec<TypedFunctionParam>>();
 
@@ -239,6 +257,7 @@ fn type_annotate_function(
         body: typed_body,
         variable_map: variable_type_map,
         id: ast_function.id,
+        source: ast_function.source,
     }
 }
 
@@ -248,34 +267,27 @@ fn type_annotate_block(
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedBlock {
-    let mut typed_statements = Vec::new();
+    let source = ast_block.source;
+    let statements = ast_block
+        .statements
+        .into_iter()
+        .map(|item| match item {
+            BlockItem::Statement(stmt) => TypedBlockItem::Statement(type_annotate_statement(
+                stmt,
+                variable_type_map,
+                function_name_map,
+                function_signature_map,
+            )),
+            BlockItem::Block(block) => TypedBlockItem::Block(type_annotate_block(
+                block,
+                variable_type_map,
+                function_name_map,
+                function_signature_map,
+            )),
+        })
+        .collect();
 
-    for item in ast_block.statements {
-        match item {
-            BlockItem::Statement(stmt) => {
-                let typed_stmt = type_annotate_statement(
-                    stmt,
-                    variable_type_map,
-                    function_name_map,
-                    function_signature_map,
-                );
-                typed_statements.push(TypedBlockItem::Statement(typed_stmt));
-            }
-            BlockItem::Block(block) => {
-                let typed_block = type_annotate_block(
-                    block,
-                    variable_type_map,
-                    function_name_map,
-                    function_signature_map,
-                );
-                typed_statements.push(TypedBlockItem::Block(typed_block));
-            }
-        }
-    }
-
-    TypedBlock {
-        statements: typed_statements,
-    }
+    TypedBlock { statements, source }
 }
 
 fn type_annotate_statement(
@@ -290,6 +302,7 @@ fn type_annotate_statement(
             type_,
             value,
             name,
+            source,
         } => {
             let typed_value = type_annotate_expression(
                 value,
@@ -297,7 +310,7 @@ fn type_annotate_statement(
                 function_name_map,
                 function_signature_map,
             );
-            let var_type = Type::from(type_);
+            let var_type = Type::from(type_.kind);
             variable_type_map.insert(variable_index, var_type);
 
             // Type check time
@@ -312,9 +325,10 @@ fn type_annotate_statement(
                 var: variable_index,
                 type_: var_type,
                 value: typed_value,
+                source,
             }
         }
-        Statement::Assignment { var, value } => {
+        Statement::Assignment { var, value, source } => {
             let typed_value = type_annotate_expression(
                 value,
                 variable_type_map,
@@ -334,16 +348,20 @@ fn type_annotate_statement(
             TypedStatement::Assignment {
                 var,
                 value: typed_value,
+                source,
             }
         }
-        Statement::Expression(expr) => {
+        Statement::Expression { expr, source } => {
             let typed_expr = type_annotate_expression(
                 expr,
                 variable_type_map,
                 function_name_map,
                 function_signature_map,
             );
-            TypedStatement::Expression(typed_expr)
+            TypedStatement::Expression {
+                expr: typed_expr,
+                source,
+            }
         }
     }
 }
@@ -355,9 +373,9 @@ fn type_annotate_expression(
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedExpression {
     match ast_expr {
-        Expression::IntLiteral(int_literal) => TypedExpression::IntLiteral {
-            int_literal,
-            type_: match int_literal {
+        Expression::IntLiteral { value, source } => TypedExpression::IntLiteral {
+            int_literal: value,
+            type_: match value {
                 IntLiteral::I8(_) => Type::I8,
                 IntLiteral::U8(_) => Type::U8,
                 IntLiteral::I16(_) => Type::I16,
@@ -367,16 +385,23 @@ fn type_annotate_expression(
                 IntLiteral::I64(_) => Type::I64,
                 IntLiteral::U64(_) => Type::U64,
             },
+            source,
         },
-        Expression::StringLiteral(str) => TypedExpression::StringLiteral {
-            type_: Type::Str(str.len()),
-            string_literal: str,
+        Expression::StringLiteral { value, source } => TypedExpression::StringLiteral {
+            type_: Type::Str(value.len()),
+            string_literal: value,
+            source,
         },
-        Expression::Variable(var) => TypedExpression::Variable {
-            type_: *variable_type_map.get(&var).expect("Variable not declared"),
-            variable: var,
+        Expression::Variable(VariableAccess { id, source }) => TypedExpression::Variable {
+            type_: *variable_type_map.get(&id).expect("Variable not declared"),
+            variable: id,
+            source,
         },
-        Expression::FnCall { name, arguments } => {
+        Expression::FnCall {
+            name,
+            arguments,
+            source,
+        } => {
             let function_id = *function_name_map
                 .get(&name)
                 .unwrap_or_else(|| panic!("unknown function {name}"));
@@ -414,17 +439,26 @@ fn type_annotate_expression(
                 function: function_id,
                 arguments: typed_arguments,
                 type_: function_signature.return_type,
+                source,
             }
         }
-        Expression::ArrayAccess { array, index_expr } => TypedExpression::ArrayAccess {
+        Expression::ArrayAccess {
             array,
-            type_: Type::U8,
-            index: Box::new(type_annotate_expression(
+            index_expr,
+            source,
+        } => {
+            let typed_index = type_annotate_expression(
                 *index_expr,
                 variable_type_map,
                 function_name_map,
                 function_signature_map,
-            )),
-        },
+            );
+            TypedExpression::ArrayAccess {
+                array: array.id,
+                index: Box::new(typed_index),
+                type_: Type::U8,
+                source,
+            }
+        }
     }
 }
