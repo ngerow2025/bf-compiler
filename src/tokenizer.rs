@@ -254,10 +254,9 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<char, LexingError> {
     Ok(c)
 }
 
-/// Implementation 2: Full Source Info
 #[derive(Debug, PartialEq, Clone)]
-pub struct LocatableToken {
-    pub token: Token,
+pub struct Locatable<T> {
+    pub value: T,
     pub loc: SourceLocation,
 }
 
@@ -318,7 +317,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn tokenize_with_locations(&mut self) -> Result<Vec<LocatableToken>> {
+    pub fn tokenize_with_locations(&mut self) -> Result<Vec<Locatable<Token>>> {
         let mut tokens = Vec::new();
         let mut lexer = Token::lexer(self.input);
         let mut errors = Vec::new();
@@ -329,7 +328,7 @@ impl<'a> Lexer<'a> {
                         span: (lexer.span().start, lexer.span().end - lexer.span().start).into(),
                         origin: self.origin.clone(),
                     };
-                    tokens.push(LocatableToken { token: t, loc });
+                    tokens.push(Locatable { value: t, loc });
                 }
                 Err(e) => {
                     errors.push(if e.kind == LexingErrorKind::Other {
