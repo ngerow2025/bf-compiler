@@ -1,11 +1,11 @@
 use core::panic;
 use std::collections::HashMap;
 
-use crate::parser::{
+use {
     ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program,
     Statement, VariableAccess, VariableId,
 };
-use crate::tokenizer::SourceLocation;
+use crate::{parser::ASTAnnotation, tokenizer::SourceLocation};
 
 #[derive(Debug)]
 pub struct TypedProgram {
@@ -19,20 +19,17 @@ pub struct TypedFunction {
     pub body: TypedBlock,
     pub variable_map: HashMap<VariableId, Type>, // this maps variable ids to their types
     pub id: FunctionId,
-    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
 pub struct TypedFunctionParam {
     pub type_: Type,
     pub variable_index: VariableId,
-    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
 pub struct TypedBlock {
     pub statements: Vec<TypedBlockItem>,
-    pub source: Option<SourceLocation>,
 }
 
 #[derive(Debug)]
@@ -48,18 +45,15 @@ pub enum TypedStatement {
         var: VariableId,
         type_: Type,
         value: TypedExpression,
-        source: Option<SourceLocation>,
     },
 
     // x = expr;
     Assignment {
         var: VariableId,
         value: TypedExpression,
-        source: Option<SourceLocation>,
     },
     Expression {
         expr: TypedExpression,
-        source: Option<SourceLocation>,
     },
 }
 
@@ -68,29 +62,24 @@ pub enum TypedExpression {
     IntLiteral {
         int_literal: IntLiteral,
         type_: Type,
-        source: Option<SourceLocation>,
     },
     StringLiteral {
         string_literal: String,
         type_: Type,
-        source: Option<SourceLocation>,
     },
     Variable {
         variable: VariableId,
         type_: Type,
-        source: Option<SourceLocation>,
     },
     FnCall {
         function: FunctionId,
         arguments: Vec<TypedExpression>,
         type_: Type,
-        source: Option<SourceLocation>,
     },
     ArrayAccess {
         array: VariableId,
         index: Box<TypedExpression>,
         type_: Type,
-        source: Option<SourceLocation>,
     },
 }
 
@@ -102,16 +91,6 @@ impl TypedExpression {
             TypedExpression::Variable { type_, .. } => *type_,
             TypedExpression::FnCall { type_, .. } => *type_,
             TypedExpression::ArrayAccess { type_, .. } => *type_,
-        }
-    }
-
-    pub fn get_source(&self) -> Option<SourceLocation> {
-        match self {
-            TypedExpression::IntLiteral { source, .. } => source.clone(),
-            TypedExpression::StringLiteral { source, .. } => source.clone(),
-            TypedExpression::Variable { source, .. } => source.clone(),
-            TypedExpression::FnCall { source, .. } => source.clone(),
-            TypedExpression::ArrayAccess { source, .. } => source.clone(),
         }
     }
 }
@@ -167,7 +146,9 @@ pub struct FunctionSignature {
     return_type: Type,
 }
 
-pub fn type_annotate_program(ast_program: Program) -> TypedProgram {
+pub fn type_annotate_program<Annotation: ASTAnnotation>(
+    ast_program: Program<Annotation>,
+) -> TypedProgram {
     // first collect all the function signatures and create mapping from function name to id
     let mut function_name_map = HashMap::new();
     let mut function_signature_map: HashMap<FunctionId, FunctionSignature> = HashMap::new();
@@ -223,8 +204,8 @@ pub fn type_annotate_program(ast_program: Program) -> TypedProgram {
     }
 }
 
-fn type_annotate_function(
-    ast_function: Function,
+fn type_annotate_function<Annotation: ASTAnnotation>(
+    ast_function: Function<Annotation>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedFunction {
@@ -240,7 +221,6 @@ fn type_annotate_function(
         .map(|p| TypedFunctionParam {
             type_: Type::from(p.type_.kind),
             variable_index: p.variable_index,
-            source: p.source,
         })
         .collect::<Vec<TypedFunctionParam>>();
 
@@ -257,17 +237,15 @@ fn type_annotate_function(
         body: typed_body,
         variable_map: variable_type_map,
         id: ast_function.id,
-        source: ast_function.source,
     }
 }
 
-fn type_annotate_block(
-    ast_block: Block,
+fn type_annotate_block<Annotation: ASTAnnotation>(
+    ast_block: Block<Annotation>,
     variable_type_map: &mut HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedBlock {
-    let source = ast_block.source;
     let statements = ast_block
         .statements
         .into_iter()
@@ -287,11 +265,11 @@ fn type_annotate_block(
         })
         .collect();
 
-    TypedBlock { statements, source }
+    TypedBlock { statements }
 }
 
-fn type_annotate_statement(
-    ast_stmt: Statement,
+fn type_annotate_statement<Annotation: ASTAnnotation>(
+    ast_stmt: Statement<Annotation>,
     variable_type_map: &mut HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
@@ -302,7 +280,7 @@ fn type_annotate_statement(
             type_,
             value,
             name,
-            source,
+            annotation: _,
         } => {
             let typed_value = type_annotate_expression(
                 value,
@@ -325,10 +303,13 @@ fn type_annotate_statement(
                 var: variable_index,
                 type_: var_type,
                 value: typed_value,
-                source,
             }
         }
-        Statement::Assignment { var, value, source } => {
+        Statement::Assignment {
+            var,
+            value,
+            annotation: _,
+        } => {
             let typed_value = type_annotate_expression(
                 value,
                 variable_type_map,
@@ -348,32 +329,34 @@ fn type_annotate_statement(
             TypedStatement::Assignment {
                 var,
                 value: typed_value,
-                source,
             }
         }
-        Statement::Expression { expr, source } => {
+        Statement::Expression {
+            expr,
+            annotation: _,
+        } => {
             let typed_expr = type_annotate_expression(
                 expr,
                 variable_type_map,
                 function_name_map,
                 function_signature_map,
             );
-            TypedStatement::Expression {
-                expr: typed_expr,
-                source,
-            }
+            TypedStatement::Expression { expr: typed_expr }
         }
     }
 }
 
-fn type_annotate_expression(
-    ast_expr: Expression,
+fn type_annotate_expression<Annotation: ASTAnnotation>(
+    ast_expr: Expression<Annotation>,
     variable_type_map: &HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedExpression {
     match ast_expr {
-        Expression::IntLiteral { value, source } => TypedExpression::IntLiteral {
+        Expression::IntLiteral {
+            value,
+            annotation: _,
+        } => TypedExpression::IntLiteral {
             int_literal: value,
             type_: match value {
                 IntLiteral::I8(_) => Type::I8,
@@ -385,22 +368,22 @@ fn type_annotate_expression(
                 IntLiteral::I64(_) => Type::I64,
                 IntLiteral::U64(_) => Type::U64,
             },
-            source,
         },
-        Expression::StringLiteral { value, source } => TypedExpression::StringLiteral {
+        Expression::StringLiteral {
+            value,
+            annotation: _,
+        } => TypedExpression::StringLiteral {
             type_: Type::Str(value.len()),
             string_literal: value,
-            source,
         },
-        Expression::Variable(VariableAccess { id, source }) => TypedExpression::Variable {
+        Expression::Variable(VariableAccess { id, annotation: _ }) => TypedExpression::Variable {
             type_: *variable_type_map.get(&id).expect("Variable not declared"),
             variable: id,
-            source,
         },
         Expression::FnCall {
             name,
             arguments,
-            source,
+            annotation: _,
         } => {
             let function_id = *function_name_map
                 .get(&name)
@@ -439,13 +422,12 @@ fn type_annotate_expression(
                 function: function_id,
                 arguments: typed_arguments,
                 type_: function_signature.return_type,
-                source,
             }
         }
         Expression::ArrayAccess {
             array,
             index_expr,
-            source,
+            annotation: _,
         } => {
             let typed_index = type_annotate_expression(
                 *index_expr,
@@ -457,7 +439,6 @@ fn type_annotate_expression(
                 array: array.id,
                 index: Box::new(typed_index),
                 type_: Type::U8,
-                source,
             }
         }
     }

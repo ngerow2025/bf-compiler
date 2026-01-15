@@ -1,39 +1,337 @@
 use miette::{Diagnostic, NamedSource};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
-use crate::tokenizer::{Locatable, SourceLocation, Token};
+use crate::tokenizer::{Locatable, Token};
 
 // --- AST Definitions ---
 
-pub struct IdentityWrapper<T> {
-    pub value: T,
+pub trait ASTAnnotation: Sized + Clone + Debug {
+    type ProgramAnnotation: Debug + Clone;
+    fn construct_program_annotation(token: Locatable<Token>) -> Self::ProgramAnnotation;
+    fn construct_program_annotation_full(
+        functions: &[Function<Self>],
+        function_name_mapping: &HashMap<FunctionId, String>,
+    ) -> Self::ProgramAnnotation;
+    type FunctionParamAnnotation: Debug + Clone;
+    fn construct_function_param_annotation(
+        token: Locatable<Token>,
+    ) -> Self::FunctionParamAnnotation;
+    fn construct_function_param_annotation_full(
+        identifier_token: &Locatable<Token>,
+        colon_token: &Locatable<Token>,
+        type_node: &ASTTypeNode<Self>,
+        variable_index: &VariableId,
+    ) -> Self::FunctionParamAnnotation;
+    type FunctionAnnotation: Debug + Clone;
+    fn construct_function_annotation(token: Locatable<Token>) -> Self::FunctionAnnotation;
+    fn construct_function_annotation_full(
+        fn_token: &Locatable<Token>,
+        name_token: &Locatable<Token>,
+        left_paren_token: &Locatable<Token>,
+        params: &[FunctionParam<Self>],
+        comma_tokens: &[Locatable<Token>],
+        right_paren_token: &Locatable<Token>,
+        body: &Block<Self>,
+        function_id: &FunctionId,
+    ) -> Self::FunctionAnnotation;
+    type BlockAnnotation: Debug + Clone;
+    fn construct_block_annotation(token: Locatable<Token>) -> Self::BlockAnnotation;
+    fn construct_block_annotation_full(
+        left_brace_token: &Locatable<Token>,
+        statements: &[BlockItem<Self>],
+        right_brace_token: &Locatable<Token>,
+    ) -> Self::BlockAnnotation;
+    type BlockItemAnnotation: Debug + Clone;
+    fn construct_block_item_annotation(token: Locatable<Token>) -> Self::BlockItemAnnotation;
+    type StatementAnnotation: Debug + Clone;
+    fn construct_expression_statement_annotation(
+        expr: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+    ) -> Self::StatementAnnotation;
+    fn construct_statement_annotation(token: Locatable<Token>) -> Self::StatementAnnotation;
+    fn construct_assignment_annotation(
+        identifier_token: &Locatable<Token>,
+        equals_token: &Locatable<Token>,
+        value: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+    ) -> Self::StatementAnnotation;
+    fn construct_var_decl_annotation(
+        let_token: &Locatable<Token>,
+        identifier_token: &Locatable<Token>,
+        colon_token: &Locatable<Token>,
+        type_node: &ASTTypeNode<Self>,
+        equals_token: &Locatable<Token>,
+        value: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+        variable_index: &VariableId,
+    ) -> Self::StatementAnnotation;
+    type ExpressionAnnotation: Debug + Clone;
+    fn construct_string_literal_annotation(
+        string_token: &Locatable<Token>,
+        value: &str,
+    ) -> Self::ExpressionAnnotation;
+    fn construct_int_literal_annotation(
+        int_token: &Locatable<Token>,
+        int_value: &str,
+        type_node: &ASTTypeNode<Self>,
+        parsed_value: &IntLiteral,
+    ) -> Self::ExpressionAnnotation;
+    fn construct_array_access_annotation(
+        array: &VariableAccess<Self>,
+        left_bracket_token: &Locatable<Token>,
+        index_expr: &Expression<Self>,
+        right_bracket_token: &Locatable<Token>,
+    ) -> Self::ExpressionAnnotation;
+    fn construct_fn_call_annotation(
+        qualified_name: &QualifiedName<Self>,
+        left_paren_token: &Locatable<Token>,
+        arguments: &[Expression<Self>],
+        comma_tokens: &[Locatable<Token>],
+        right_paren_token: &Locatable<Token>,
+    ) -> Self::ExpressionAnnotation;
+    type VariableAccessAnnotation: Debug + Clone;
+    fn construct_variable_access_annotation(
+        name_token: &Locatable<Token>,
+        name: &str,
+        variable_id: &VariableId,
+    ) -> Self::VariableAccessAnnotation;
+    type QualifiedIdentifierAnnotation: Debug + Clone;
+    fn construct_qualified_identifier_annotation(
+        identifier_tokens: &[Locatable<Token>],
+        double_colon_tokens: &[Locatable<Token>],
+        parts: &[String],
+        name: &str,
+    ) -> Self::QualifiedIdentifierAnnotation;
+    type ASTTypeNodeAnnotation: Debug + Clone;
+    fn construct_simple_type_node_annotation(
+        type_token: &Locatable<Token>,
+        kind: &ASTTypeKind,
+    ) -> Self::ASTTypeNodeAnnotation;
+    fn construct_str_type_node_annotation(
+        type_token: &Locatable<Token>,
+        kind: &ASTTypeKind,
+        left_angle_token: &Locatable<Token>,
+        size_token: &Locatable<Token>,
+        right_angle_token: &Locatable<Token>,
+    ) -> Self::ASTTypeNodeAnnotation;
 }
 
-pub trait NodeWrapper<T> {
-    fn value(&self) -> &T;
+impl ASTAnnotation for () {
+    type ProgramAnnotation = ();
+
+    fn construct_program_annotation(token: Locatable<Token>) -> Self::ProgramAnnotation {
+        ()
+    }
+
+    fn construct_program_annotation_full(
+        functions: &[Function<Self>],
+        function_name_mapping: &HashMap<FunctionId, String>,
+    ) -> Self::ProgramAnnotation {
+        ()
+    }
+
+    type FunctionParamAnnotation = ();
+
+    fn construct_function_param_annotation(
+        token: Locatable<Token>,
+    ) -> Self::FunctionParamAnnotation {
+        ()
+    }
+
+    fn construct_function_param_annotation_full(
+        identifier_token: &Locatable<Token>,
+        colon_token: &Locatable<Token>,
+        type_node: &ASTTypeNode<Self>,
+        variable_index: &VariableId,
+    ) -> Self::FunctionParamAnnotation {
+        ()
+    }
+
+    type FunctionAnnotation = ();
+
+    fn construct_function_annotation(token: Locatable<Token>) -> Self::FunctionAnnotation {
+        ()
+    }
+
+    fn construct_function_annotation_full(
+        fn_token: &Locatable<Token>,
+        name_token: &Locatable<Token>,
+        left_paren_token: &Locatable<Token>,
+        params: &[FunctionParam<Self>],
+        comma_tokens: &[Locatable<Token>],
+        right_paren_token: &Locatable<Token>,
+        body: &Block<Self>,
+        function_id: &FunctionId,
+    ) -> Self::FunctionAnnotation {
+        ()
+    }
+
+    type BlockAnnotation = ();
+
+    fn construct_block_annotation(token: Locatable<Token>) -> Self::BlockAnnotation {
+        ()
+    }
+
+    fn construct_block_annotation_full(
+        left_brace_token: &Locatable<Token>,
+        statements: &[BlockItem<Self>],
+        right_brace_token: &Locatable<Token>,
+    ) -> Self::BlockAnnotation {
+        ()
+    }
+
+    type BlockItemAnnotation = ();
+
+    fn construct_block_item_annotation(token: Locatable<Token>) -> Self::BlockItemAnnotation {
+        ()
+    }
+
+    type StatementAnnotation = ();
+
+    fn construct_expression_statement_annotation(
+        expr: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+    ) -> Self::StatementAnnotation {
+        ()
+    }
+
+    fn construct_statement_annotation(token: Locatable<Token>) -> Self::StatementAnnotation {
+        ()
+    }
+
+    fn construct_assignment_annotation(
+        identifier_token: &Locatable<Token>,
+        equals_token: &Locatable<Token>,
+        value: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+    ) -> Self::StatementAnnotation {
+        ()
+    }
+
+    fn construct_var_decl_annotation(
+        let_token: &Locatable<Token>,
+        identifier_token: &Locatable<Token>,
+        colon_token: &Locatable<Token>,
+        type_node: &ASTTypeNode<Self>,
+        equals_token: &Locatable<Token>,
+        value: &Expression<Self>,
+        semicolon_token: &Locatable<Token>,
+        variable_index: &VariableId,
+    ) -> Self::StatementAnnotation {
+        ()
+    }
+
+    type ExpressionAnnotation = ();
+
+    fn construct_string_literal_annotation(
+        string_token: &Locatable<Token>,
+        value: &str,
+    ) -> Self::ExpressionAnnotation {
+        ()
+    }
+
+    fn construct_int_literal_annotation(
+        int_token: &Locatable<Token>,
+        int_value: &str,
+        type_node: &ASTTypeNode<Self>,
+        parsed_value: &IntLiteral,
+    ) -> Self::ExpressionAnnotation {
+        ()
+    }
+
+    fn construct_array_access_annotation(
+        array: &VariableAccess<Self>,
+        left_bracket_token: &Locatable<Token>,
+        index_expr: &Expression<Self>,
+        right_bracket_token: &Locatable<Token>,
+    ) -> Self::ExpressionAnnotation {
+        ()
+    }
+
+    fn construct_fn_call_annotation(
+        qualified_name: &QualifiedName<Self>,
+        left_paren_token: &Locatable<Token>,
+        arguments: &[Expression<Self>],
+        comma_tokens: &[Locatable<Token>],
+        right_paren_token: &Locatable<Token>,
+    ) -> Self::ExpressionAnnotation {
+        ()
+    }
+
+    type VariableAccessAnnotation = ();
+
+    fn construct_variable_access_annotation(
+        name_token: &Locatable<Token>,
+        name: &str,
+        variable_id: &VariableId,
+    ) -> Self::VariableAccessAnnotation {
+        ()
+    }
+
+    type QualifiedIdentifierAnnotation = ();
+
+    fn construct_qualified_identifier_annotation(
+        identifier_tokens: &[Locatable<Token>],
+        double_colon_tokens: &[Locatable<Token>],
+        parts: &[String],
+        name: &str,
+    ) -> Self::QualifiedIdentifierAnnotation {
+        ()
+    }
+
+    type ASTTypeNodeAnnotation = ();
+
+    fn construct_simple_type_node_annotation(
+        type_token: &Locatable<Token>,
+        kind: &ASTTypeKind,
+    ) -> Self::ASTTypeNodeAnnotation {
+        ()
+    }
+
+    fn construct_str_type_node_annotation(
+        type_token: &Locatable<Token>,
+        kind: &ASTTypeKind,
+        left_angle_token: &Locatable<Token>,
+        size_token: &Locatable<Token>,
+        right_angle_token: &Locatable<Token>,
+    ) -> Self::ASTTypeNodeAnnotation {
+        ()
+    }
 }
+
+// struct MultiAnnotation2<T1, T2> {
+//     type_1_marker: std::marker::PhantomData<T1>,
+//     type_2_marker: std::marker::PhantomData<T2>,
+// }
+
+// impl<T1, T2> ASTAnnotation for MultiAnnotation2<T1, T2> {
+
+// }
 
 #[derive(Debug, Clone)]
-pub struct Program<NodeWrapper: NodeWrapper = IdentityWrapper> {
-    pub functions: Vec<Function>,
+pub struct Program<Annotation: ASTAnnotation> {
+    pub functions: Vec<Function<Annotation>>,
     pub function_name_mapping: HashMap<FunctionId, String>,
+    pub annotation: Annotation::ProgramAnnotation,
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionParam {
-    pub type_: ASTTypeNode,
+pub struct FunctionParam<Annotation: ASTAnnotation> {
+    pub type_: ASTTypeNode<Annotation>,
     pub variable_index: VariableId,
+    pub annotation: Annotation::FunctionParamAnnotation,
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
+pub struct Function<Annotation: ASTAnnotation> {
     pub name: String,
-    pub params: Vec<FunctionParam>,
-    pub body: Block,
+    pub params: Vec<FunctionParam<Annotation>>,
+    pub body: Block<Annotation>,
     pub id: FunctionId,
     pub variable_name_mapping: HashMap<VariableId, String>,
+    pub annotation: Annotation::FunctionAnnotation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,34 +344,38 @@ impl Display for FunctionId {
 }
 
 #[derive(Debug, Clone)]
-pub enum BlockItem {
-    Statement(Statement),
-    Block(Block),
+pub enum BlockItem<Annotation: ASTAnnotation> {
+    Statement(Statement<Annotation>),
+    Block(Block<Annotation>),
 }
 
 #[derive(Debug, Clone)]
-pub struct Block {
-    pub statements: Vec<BlockItem>,
+pub struct Block<Annotation: ASTAnnotation> {
+    pub statements: Vec<BlockItem<Annotation>>,
+    pub annotation: Annotation::BlockAnnotation,
 }
 
 #[derive(Debug, Clone)]
-pub enum Statement {
+pub enum Statement<Annotation: ASTAnnotation> {
     // let x: type = expr;
     VarDecl {
         name: String,
-        type_: ASTTypeNode,
-        value: Expression,
+        type_: ASTTypeNode<Annotation>,
+        value: Expression<Annotation>,
         variable_index: VariableId,
+        annotation: Annotation::StatementAnnotation,
     },
     // x = expr;
     Assignment {
         var: VariableId,
-        value: Expression,
+        value: Expression<Annotation>,
+        annotation: Annotation::StatementAnnotation,
     },
 
     // expr;
     Expression {
-        expr: Expression,
+        expr: Expression<Annotation>,
+        annotation: Annotation::StatementAnnotation,
     },
 }
 
@@ -90,26 +392,31 @@ pub enum IntLiteral {
 }
 
 #[derive(Debug, Clone)]
-pub struct VariableAccess {
+pub struct VariableAccess<Annotation: ASTAnnotation> {
     pub id: VariableId,
+    pub annotation: Annotation::VariableAccessAnnotation,
 }
 
 #[derive(Debug, Clone)]
-pub enum Expression {
+pub enum Expression<Annotation: ASTAnnotation> {
     IntLiteral {
         value: IntLiteral,
+        annotation: Annotation::ExpressionAnnotation,
     },
     StringLiteral {
         value: String,
+        annotation: Annotation::ExpressionAnnotation,
     },
-    Variable(VariableAccess),
+    Variable(VariableAccess<Annotation>),
     ArrayAccess {
-        array: VariableAccess,
-        index_expr: Box<Expression>,
+        array: VariableAccess<Annotation>,
+        index_expr: Box<Expression<Annotation>>,
+        annotation: Annotation::ExpressionAnnotation,
     },
     FnCall {
         name: String,
-        arguments: Vec<Expression>,
+        arguments: Vec<Expression<Annotation>>,
+        annotation: Annotation::ExpressionAnnotation,
     },
 }
 
@@ -178,10 +485,9 @@ impl Error for ExpectedTokenError {
     }
 }
 
-struct QualifiedName {
+pub struct QualifiedName<Annotation: ASTAnnotation> {
     parts: Vec<String>,
-    part_sources: Option<Vec<SourceLocation>>,
-    source: Option<SourceLocation>,
+    annotation: Annotation::QualifiedIdentifierAnnotation,
 }
 
 pub struct Parser {
@@ -232,52 +538,62 @@ impl Parser {
 
     // --- Parsing Logic ---
 
-    pub fn parse_program(&mut self) -> Result<Program, String> {
+    pub fn parse_program<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Program<Annotation>, String> {
         let mut functions = Vec::new();
         let mut current_function_id = FunctionId(0);
         while self.peek().is_some() {
-            functions.push(self.parse_function(current_function_id)?);
+            functions.push(self.parse_function::<Annotation>(current_function_id)?);
             current_function_id = FunctionId(current_function_id.0 + 1);
         }
         Ok(Program {
-            functions,
+            functions: functions.clone(),
             function_name_mapping: self.function_name_mapping.clone(),
+            annotation: Annotation::construct_program_annotation_full(
+                &functions,
+                &self.function_name_mapping,
+            ),
         })
     }
 
-    fn parse_function(&mut self, id: FunctionId) -> Result<Locatable<Function>, String> {
+    fn parse_function<Annotation: ASTAnnotation>(
+        &mut self,
+        id: FunctionId,
+    ) -> Result<Function<Annotation>, String> {
         self.variable_index = VariableId(0);
         self.variable_tracker.clear();
         self.variable_tracker.push(HashMap::new());
         self.variable_name_mapping.clear();
         // Grammar: "fn" ID "(" ")" Block
-        self.expect(Token::Fn)?;
+        let fn_token = self.expect(Token::Fn)?;
 
         let name_token = self.advance().expect("should have a name token");
 
         let name = match name_token.value {
-            Token::Identifier(n) => n.clone(),
+            Token::Identifier(ref n) => n.clone(),
             t => return Err(format!("Expected function name, found {:?}", t)),
         };
 
         self.function_name_mapping.insert(id, name.clone());
 
-        self.expect(Token::LParen)?;
+        let left_paren_token = self.expect(Token::LParen)?;
 
         let mut params = Vec::new();
+        let mut param_comma_tokens = Vec::new();
         //parse parameters
         //syntax: fn function_name(param: Type)
         while self.peek().map(|t| &t.value) != Some(&Token::RParen) {
-            let name_token = self.advance().expect("should have a name token");
+            let param_identifier_token = self.advance().expect("should have a name token");
 
-            let param_name = match name_token.value {
-                Token::Identifier(n) => n.clone(),
+            let param_name = match param_identifier_token.value {
+                Token::Identifier(ref n) => n.clone(),
                 t => return Err(format!("Expected parameter name, found {:?}", t)),
             };
 
-            self.expect(Token::Colon)?;
+            let param_colon_token = self.expect(Token::Colon)?;
 
-            let param_type = self.parse_type()?;
+            let param_type = self.parse_type::<Annotation>()?;
 
             // assign variable index
             let var_index = self.variable_index;
@@ -290,58 +606,72 @@ impl Parser {
             self.variable_name_mapping
                 .insert(var_index, param_name.clone());
 
-            params.push(Locatable::<FunctionParam> {
-                loc: SourceLocation::superset(&[&name_token.loc, param_type.loc.as_ref().unwrap()]),
-                value: FunctionParam {
-                    variable_index: var_index,
-                    type_: param_type,
-                },
+            params.push(FunctionParam {
+                variable_index: var_index,
+                type_: param_type.clone(),
+                annotation: Annotation::construct_function_param_annotation_full(
+                    &param_identifier_token,
+                    &param_colon_token,
+                    &param_type,
+                    &var_index,
+                ),
             });
 
             if self.peek().map(|t| &t.value) == Some(&Token::Comma) {
-                self.advance(); // consume comma
+                let comma_token = self.advance().unwrap();
+                param_comma_tokens.push(comma_token);
             } else {
                 break; // no more parameters
             }
         }
 
-        self.expect(Token::RParen)?;
+        let right_paren_token = self.expect(Token::RParen)?;
 
-        let body = self.parse_block()?;
+        let body = self.parse_block::<Annotation>()?;
 
-        Ok(Locatable::<Function> {
-            loc: SourceLocation::superset(&[&name_token.loc, body.loc.as_ref().unwrap()]),
-            value: Function {
-                name,
-                params,
-                id,
-                variable_name_mapping: self.variable_name_mapping.clone(),
-                body,
-            },
+        Ok(Function {
+            name,
+            params: params.clone(),
+            id,
+            variable_name_mapping: self.variable_name_mapping.clone(),
+            body: body.clone(),
+            annotation: Annotation::construct_function_annotation_full(
+                &fn_token,
+                &name_token,
+                &left_paren_token,
+                &params,
+                &param_comma_tokens,
+                &right_paren_token,
+                &body,
+                &id,
+            ),
         })
     }
 
-    fn parse_block(&mut self) -> Result<Block, String> {
+    fn parse_block<Annotation: ASTAnnotation>(&mut self) -> Result<Block<Annotation>, String> {
         self.variable_tracker.push(HashMap::new());
-        let start_token = self.expect(Token::LBrace)?;
+        let left_brace_token = self.expect(Token::LBrace)?;
         let mut statements = Vec::new();
 
         while self.peek().is_some() && self.peek().map(|t| &t.value) != Some(&Token::RBrace) {
-            statements.push(self.parse_statement_or_block()?);
+            statements.push(self.parse_statement_or_block::<Annotation>()?);
         }
 
-        let end_token = self.expect(Token::RBrace)?;
+        let right_brace_token = self.expect(Token::RBrace)?;
         self.variable_tracker.pop();
         Ok(Block {
-            statements,
-            source: Some(SourceLocation::superset(&[
-                &start_token.loc,
-                &end_token.loc,
-            ])),
+            statements: statements.clone(),
+            annotation: Annotation::construct_block_annotation_full(
+                &left_brace_token,
+                &statements,
+                &right_brace_token,
+            ),
         })
     }
 
-    fn parse_statement_or_block(&mut self) -> Result<BlockItem, String> {
+    fn parse_statement_or_block<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<BlockItem<Annotation>, String> {
         if self.peek().map(|t| &t.value) == Some(&Token::LBrace) {
             let block = self.parse_block()?;
             Ok(BlockItem::Block(block))
@@ -351,7 +681,9 @@ impl Parser {
         }
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, String> {
+    fn parse_statement<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Statement<Annotation>, String> {
         let token = self.peek().ok_or("Unexpected EOF")?;
         match &token.value {
             Token::Let => self.parse_var_decl(),
@@ -364,11 +696,11 @@ impl Parser {
                         let parsed_expr = self.parse_expression()?;
                         let semicolon_token = self.expect(Token::Semicolon)?;
                         Ok(Statement::Expression {
-                            source: Some(SourceLocation::superset(&[
-                                &parsed_expr.get_source().unwrap(),
-                                &semicolon_token.loc,
-                            ])),
-                            expr: parsed_expr,
+                            expr: parsed_expr.clone(),
+                            annotation: Annotation::construct_expression_statement_annotation(
+                                &parsed_expr,
+                                &semicolon_token,
+                            ),
                         })
                     }
                 }
@@ -377,34 +709,37 @@ impl Parser {
                 let parsed_expr = self.parse_expression()?;
                 let semicolon_token = self.expect(Token::Semicolon)?;
                 Ok(Statement::Expression {
-                    source: Some(SourceLocation::superset(&[
-                        &parsed_expr.get_source().unwrap(),
-                        &semicolon_token.loc,
-                    ])),
-                    expr: parsed_expr,
+                    expr: parsed_expr.clone(),
+                    annotation: Annotation::construct_expression_statement_annotation(
+                        &parsed_expr,
+                        &semicolon_token,
+                    ),
                 })
             }
         }
     }
 
-    fn parse_var_decl(&mut self) -> Result<Statement, String> {
+    fn parse_var_decl<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Statement<Annotation>, String> {
         // Grammar: "let" ID ":" Type "=" Expression ";"
-        let let_token = self.advance().expect("need the let token"); // consume 'let'
+        let let_token = self.advance().ok_or("Expected 'let'")?;
 
-        let name = match self.advance().map(|t| t.value) {
-            Some(Token::Identifier(n)) => n.clone(),
-            t => return Err(format!("Expected variable name, found {:?}", t)),
+        let identifier_token = self.advance().ok_or("Expected identifier")?;
+        let name = match identifier_token.value {
+            Token::Identifier(ref n) => n.clone(),
+            _ => return Err(format!("Expected variable name")),
         };
 
-        self.expect(Token::Colon)?;
+        let colon_token = self.expect(Token::Colon)?;
 
         // Parse Type
-        let type_ = self.parse_type()?;
+        let type_ = self.parse_type::<Annotation>()?;
 
-        self.expect(Token::Equals)?;
+        let equals_token = self.expect(Token::Equals)?;
 
         // Parse Expression
-        let expr_ast = self.parse_expression()?;
+        let expr_ast = self.parse_expression::<Annotation>()?;
 
         let semicolon_token = self.expect(Token::Semicolon)?;
 
@@ -430,30 +765,37 @@ impl Parser {
 
         Ok(Statement::VarDecl {
             name,
-            type_,
-            value: expr_ast,
+            type_: type_.clone(),
+            value: expr_ast.clone(),
             variable_index: var_index,
-            source: Some(SourceLocation::superset(&[
-                &let_token.loc,
-                &semicolon_token.loc,
-            ])),
+            annotation: Annotation::construct_var_decl_annotation(
+                &let_token,
+                &identifier_token,
+                &colon_token,
+                &type_,
+                &equals_token,
+                &expr_ast,
+                &semicolon_token,
+                &var_index,
+            ),
         })
     }
 
-    fn parse_assignment(&mut self) -> Result<Statement, String> {
+    fn parse_assignment<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Statement<Annotation>, String> {
         // Grammar: ID "=" Expression ";"
-        let name_token = self.peek().cloned().ok_or("Unexpected EOF")?;
-
-        let name = match self.advance().map(|t| t.value) {
-            Some(Token::Identifier(n)) => n.clone(),
+        let identifier_token = self.advance().ok_or("Expected identifier")?;
+        let name = match identifier_token.value {
+            Token::Identifier(ref n) => n.clone(),
             _ => return Err("Expected identifier".into()),
         };
 
-        self.expect(Token::Equals)?;
+        let equals_token = self.expect(Token::Equals)?;
 
         let expr_ast = self.parse_expression()?;
 
-        self.expect(Token::Semicolon)?;
+        let semicolon_token = self.expect(Token::Semicolon)?;
 
         // grab variable index
         let mut found_index = None;
@@ -469,83 +811,101 @@ impl Parser {
         ))?;
         Ok(Statement::Assignment {
             var: var_index,
-            source: Some(SourceLocation::superset(&[
-                &name_token.loc,
-                &expr_ast.get_source().unwrap(),
-            ])),
-            value: expr_ast,
+            value: expr_ast.clone(),
+            annotation: Annotation::construct_assignment_annotation(
+                &identifier_token,
+                &equals_token,
+                &expr_ast,
+                &semicolon_token,
+            ),
         })
     }
 
-    fn parse_function_call(&mut self) -> Result<Expression, String> {
-        // Grammar: ID "(" ")"
-        let name_token = self.parse_qualified_identifier()?;
-        let name = name_token.parts.join("::");
+    fn parse_function_call<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Expression<Annotation>, String> {
+        // Grammar: ID "(" ")" or ID ("::" ID)* "(" Arguments? ")"
+        let qualified_name = self.parse_qualified_identifier()?;
+        let name = qualified_name.parts.join("::");
 
-        self.expect(Token::LParen)?;
+        let left_paren = self.expect(Token::LParen)?;
 
         let mut args = Vec::new();
+        let mut comma_tokens = Vec::new();
+
         while self.peek().map(|t| &t.value) != Some(&Token::RParen) {
             let arg_expr = self.parse_expression()?;
             args.push(arg_expr);
 
             if self.peek().map(|t| &t.value) == Some(&Token::Comma) {
-                self.advance(); // consume comma
+                let comma_token = self.advance().unwrap();
+                comma_tokens.push(comma_token);
             } else {
                 break; // no more arguments
             }
         }
 
-        let r_paren_token = self.expect(Token::RParen)?;
+        let right_paren = self.expect(Token::RParen)?;
 
         // function type checking will happen in a later phase
 
         Ok(Expression::FnCall {
-            name,
-            arguments: args,
-            source: Some(SourceLocation::superset(&[
-                &name_token.source.unwrap(),
-                &r_paren_token.loc,
-            ])),
+            name: name.clone(),
+            arguments: args.clone(),
+            annotation: Annotation::construct_fn_call_annotation(
+                &qualified_name,
+                &left_paren,
+                &args,
+                &comma_tokens,
+                &right_paren,
+            ),
         })
     }
 
-    fn parse_qualified_identifier(&mut self) -> Result<QualifiedName, String> {
+    fn parse_qualified_identifier<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<QualifiedName<Annotation>, String> {
         // Grammar: ID ("::" ID)*
         let mut parts = Vec::new();
-        let mut source_locations = Vec::new();
+        let mut identifier_tokens = Vec::new();
+        let mut double_colon_tokens = Vec::new();
 
         let first_token = self.advance().ok_or("Expected identifier")?;
-        let first_name = match first_token.value {
+        let first_name = match &first_token.value {
             Token::Identifier(n) => n.clone(),
             _ => return Err("Expected identifier".into()),
         };
         parts.push(first_name);
-        source_locations.push(first_token.loc);
+        identifier_tokens.push(first_token);
+
         while self.peek().map(|t| &t.value) == Some(&Token::DoubleColon) {
-            self.advance(); // consume '::'
+            let double_colon_token = self.advance().unwrap();
+            double_colon_tokens.push(double_colon_token);
 
             let next_token = self.advance().ok_or("Expected identifier after '::'")?;
-            let next_name = match next_token.value {
+            let next_name = match &next_token.value {
                 Token::Identifier(n) => n.clone(),
                 _ => return Err("Expected identifier after '::'".into()),
             };
             parts.push(next_name);
-            source_locations.push(next_token.loc);
+            identifier_tokens.push(next_token);
         }
 
-        Ok(QualifiedName {
-            parts,
-            source: Some(SourceLocation::superset(&[
-                source_locations.first().unwrap(),
-                source_locations.last().unwrap(),
-            ])),
-            part_sources: Some(source_locations),
-        })
+        let name = parts.join("::");
+        let annotation = Annotation::construct_qualified_identifier_annotation(
+            &identifier_tokens,
+            &double_colon_tokens,
+            &parts,
+            &name,
+        );
+
+        Ok(QualifiedName { parts, annotation })
     }
 
     // Returns the AST node AND its resolved type
-    fn parse_expression(&mut self) -> Result<Expression, String> {
+    fn parse_expression<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Expression<Annotation>, String> {
         let token = self.peek().ok_or("Unexpected EOF in expression")?;
 
         match token.value {
@@ -565,10 +925,12 @@ impl Parser {
         }
     }
 
-    fn parse_int_literal(&mut self) -> Result<Expression, String> {
+    fn parse_int_literal<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Expression<Annotation>, String> {
         let int_token = self.advance().ok_or("Expected integer literal")?;
 
-        let int_value = match int_token.value {
+        let int_value = match &int_token.value {
             Token::IntLiteral(s) => s.clone(),
             _ => return Err("Expected integer literal".into()),
         };
@@ -633,53 +995,66 @@ impl Parser {
         };
 
         Ok(Expression::IntLiteral {
-            value: parsed_value,
-            source: Some(SourceLocation::superset(&[
-                &int_token.loc,
-                type_token.source.as_ref().unwrap(),
-            ])),
+            value: parsed_value.clone(),
+            annotation: Annotation::construct_int_literal_annotation(
+                &int_token,
+                &int_value,
+                &type_token,
+                &parsed_value,
+            ),
         })
     }
 
-    fn parse_string_literal(&mut self) -> Result<Expression, String> {
+    fn parse_string_literal<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Expression<Annotation>, String> {
         let str_token = self.advance().ok_or("Expected string literal")?;
 
-        let str_value = match str_token.value {
+        let str_value = match &str_token.value {
             Token::StringLiteral(s) => s.clone(),
             _ => return Err("Expected string literal".into()),
         };
 
         Ok(Expression::StringLiteral {
-            value: str_value,
-            source: Some(str_token.loc),
+            value: str_value.clone(),
+            annotation: Annotation::construct_string_literal_annotation(&str_token, &str_value),
         })
     }
 
-    fn parse_array_access(&mut self) -> Result<Expression, String> {
+    fn parse_array_access<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<Expression<Annotation>, String> {
         // Grammar: ID "[" Expression "]"
         let variable_access = self.parse_variable_access()?;
 
-        self.expect(Token::LSquare)?;
+        let left_bracket = self.expect(Token::LSquare)?;
 
-        let index_expr = self.parse_expression()?;
+        //TODO: remove type annotation
+        let index_expr: Expression<Annotation> = self.parse_expression()?;
 
-        let r_square_token = self.expect(Token::RSquare)?;
+        let right_bracket = self.expect(Token::RSquare)?;
+
+        let annotation = Annotation::construct_array_access_annotation(
+            &variable_access,
+            &left_bracket,
+            &index_expr,
+            &right_bracket,
+        );
 
         Ok(Expression::ArrayAccess {
             index_expr: Box::new(index_expr),
-            source: Some(SourceLocation::superset(&[
-                &variable_access.source.clone().unwrap(),
-                &r_square_token.loc,
-            ])),
             array: variable_access,
+            annotation,
         })
     }
 
-    fn parse_variable_access(&mut self) -> Result<VariableAccess, String> {
+    fn parse_variable_access<Annotation: ASTAnnotation>(
+        &mut self,
+    ) -> Result<VariableAccess<Annotation>, String> {
         // Grammar: ID
         let name_token = self.advance().ok_or("Expected identifier for variable")?;
 
-        let name = match name_token.value {
+        let name = match &name_token.value {
             Token::Identifier(n) => n.clone(),
             _ => return Err("Expected identifier for variable".into()),
         };
@@ -697,58 +1072,94 @@ impl Parser {
 
         Ok(VariableAccess {
             id: var_index,
-            source: Some(name_token.loc),
+            annotation: Annotation::construct_variable_access_annotation(
+                &name_token,
+                &name,
+                &var_index,
+            ),
         })
     }
 
-    //TODO: use parse_variable everywhere and add Varible struct for tracking source info like for the ArrayAccess node
-
-    fn parse_type(&mut self) -> Result<ASTTypeNode, String> {
+    fn parse_type<Annotation: ASTAnnotation>(&mut self) -> Result<ASTTypeNode<Annotation>, String> {
         let t = self.advance().ok_or("Expected type")?;
         match t.value {
-            Token::TypeU8 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::U8,
-                source: Some(t.loc),
-            }),
-            Token::TypeI8 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::I8,
-                source: Some(t.loc),
-            }),
-            Token::TypeU16 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::U16,
-                source: Some(t.loc),
-            }),
-            Token::TypeI16 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::I16,
-                source: Some(t.loc),
-            }),
-            Token::TypeU32 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::U32,
-                source: Some(t.loc),
-            }),
-            Token::TypeI32 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::I32,
-                source: Some(t.loc),
-            }),
-            Token::TypeU64 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::U64,
-                source: Some(t.loc),
-            }),
-            Token::TypeI64 => Ok(ASTTypeNode {
-                kind: ASTTypeKind::I64,
-                source: Some(t.loc),
-            }),
+            Token::TypeU8 => {
+                let kind = ASTTypeKind::U8;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeI8 => {
+                let kind = ASTTypeKind::I8;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeU16 => {
+                let kind = ASTTypeKind::U16;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeI16 => {
+                let kind = ASTTypeKind::I16;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeU32 => {
+                let kind = ASTTypeKind::U32;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeI32 => {
+                let kind = ASTTypeKind::I32;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeU64 => {
+                let kind = ASTTypeKind::U64;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
+            Token::TypeI64 => {
+                let kind = ASTTypeKind::I64;
+                Ok(ASTTypeNode {
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_simple_type_node_annotation(&t, &kind),
+                })
+            }
             Token::TypeStr => {
                 // Format: str<INT>
-                self.expect(Token::LAngle)?;
-                let size = match self.advance().map(|t| t.value) {
-                    Some(Token::IntLiteral(n)) => n.parse::<usize>().unwrap(),
+                let left_angle = self.expect(Token::LAngle)?;
+                let size_token = self
+                    .advance()
+                    .ok_or("Expected integer literal for string size")?;
+                let size = match size_token.value {
+                    Token::IntLiteral(ref n) => n.parse::<usize>().unwrap(),
                     _ => return Err("Expected integer literal for string size".into()),
                 };
-                let r_angle_token = self.expect(Token::RAngle)?;
+                let right_angle = self.expect(Token::RAngle)?;
+                let kind = ASTTypeKind::Str(size);
                 Ok(ASTTypeNode {
-                    kind: ASTTypeKind::Str(size),
-                    source: Some(SourceLocation::superset(&[&t.loc, &r_angle_token.loc])),
+                    kind: kind.clone(),
+                    annotation: Annotation::construct_str_type_node_annotation(
+                        &t,
+                        &kind,
+                        &left_angle,
+                        &size_token,
+                        &right_angle,
+                    ),
                 })
             }
             _ => Err(format!("Unknown type token: {:?}", t)),
@@ -757,9 +1168,9 @@ impl Parser {
 }
 
 #[derive(Debug, Clone)]
-pub struct ASTTypeNode {
+pub struct ASTTypeNode<Annotation: ASTAnnotation> {
     pub kind: ASTTypeKind,
-    pub source: Option<SourceLocation>,
+    pub annotation: Annotation::ASTTypeNodeAnnotation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]

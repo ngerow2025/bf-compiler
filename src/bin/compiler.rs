@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     let tokens = lexer.tokenize_with_locations()?;
 
     let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse_program();
+    let ast = parser.parse_program::<()>();
 
     /*
     let type_checked = type_annotate_program(ast.clone().unwrap());

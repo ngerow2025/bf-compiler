@@ -245,7 +245,7 @@ impl<'a> FunctionLowerer<'a> {
                 });
                 instructions
             }
-            TypedStatement::Expression(expr) => self.lower_expression(expr).1,
+            TypedStatement::Expression { expr } => self.lower_expression(expr).1,
         }
     }
 
