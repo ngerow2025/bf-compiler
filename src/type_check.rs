@@ -1,11 +1,10 @@
 use core::panic;
 use std::collections::HashMap;
 
-use {
-    ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program,
-    Statement, VariableAccess, VariableId,
+use crate::parser::{
+    ASTAnnotation, ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral,
+    Program, Statement, VariableAccess, VariableId,
 };
-use crate::{parser::ASTAnnotation, tokenizer::SourceLocation};
 
 #[derive(Debug)]
 pub struct TypedProgram {
