@@ -1,9 +1,7 @@
 use std::fmt::Display;
 use std::{collections::HashMap, vec};
 
-use crate::parser::{
-    Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program, Statement, VariableId,
-};
+use crate::parser::{FunctionId, IntLiteral, VariableId};
 use crate::type_check::*;
 
 #[derive(Debug)]

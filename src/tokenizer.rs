@@ -1,7 +1,5 @@
-use std::iter::Peekable;
-use std::str::Chars;
+use std::fmt::Display;
 use std::sync::Arc;
-use std::{default, fmt::Display};
 
 use logos::Logos;
 use miette::{Diagnostic, NamedSource, Result, SourceSpan};
