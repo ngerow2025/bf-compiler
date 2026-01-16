@@ -7,24 +7,19 @@ use crate::tokenizer::{Locatable, Token};
 
 pub trait ASTAnnotation: Sized + Clone + Debug {
     type ProgramAnnotation: Debug + Clone;
-    fn construct_program_annotation(token: Locatable<Token>) -> Self::ProgramAnnotation;
-    fn construct_program_annotation_full(
+    fn construct_program_annotation(
         functions: &[Function<Self>],
         function_name_mapping: &HashMap<FunctionId, String>,
     ) -> Self::ProgramAnnotation;
     type FunctionParamAnnotation: Debug + Clone;
     fn construct_function_param_annotation(
-        token: Locatable<Token>,
-    ) -> Self::FunctionParamAnnotation;
-    fn construct_function_param_annotation_full(
         identifier_token: &Locatable<Token>,
         colon_token: &Locatable<Token>,
         type_node: &ASTTypeNode<Self>,
         variable_index: &VariableId,
     ) -> Self::FunctionParamAnnotation;
     type FunctionAnnotation: Debug + Clone;
-    fn construct_function_annotation(token: Locatable<Token>) -> Self::FunctionAnnotation;
-    fn construct_function_annotation_full(
+    fn construct_function_annotation(
         fn_token: &Locatable<Token>,
         name_token: &Locatable<Token>,
         left_paren_token: &Locatable<Token>,
@@ -35,20 +30,16 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         function_id: &FunctionId,
     ) -> Self::FunctionAnnotation;
     type BlockAnnotation: Debug + Clone;
-    fn construct_block_annotation(token: Locatable<Token>) -> Self::BlockAnnotation;
-    fn construct_block_annotation_full(
+    fn construct_block_annotation(
         left_brace_token: &Locatable<Token>,
         statements: &[BlockItem<Self>],
         right_brace_token: &Locatable<Token>,
     ) -> Self::BlockAnnotation;
-    type BlockItemAnnotation: Debug + Clone;
-    fn construct_block_item_annotation(token: Locatable<Token>) -> Self::BlockItemAnnotation;
     type StatementAnnotation: Debug + Clone;
     fn construct_expression_statement_annotation(
         expr: &Expression<Self>,
         semicolon_token: &Locatable<Token>,
     ) -> Self::StatementAnnotation;
-    fn construct_statement_annotation(token: Locatable<Token>) -> Self::StatementAnnotation;
     fn construct_assignment_annotation(
         identifier_token: &Locatable<Token>,
         equals_token: &Locatable<Token>,
@@ -119,11 +110,7 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
 impl ASTAnnotation for () {
     type ProgramAnnotation = ();
 
-    fn construct_program_annotation(_token: Locatable<Token>) -> Self::ProgramAnnotation {
-        ()
-    }
-
-    fn construct_program_annotation_full(
+    fn construct_program_annotation(
         _functions: &[Function<Self>],
         _function_name_mapping: &HashMap<FunctionId, String>,
     ) -> Self::ProgramAnnotation {
@@ -133,12 +120,6 @@ impl ASTAnnotation for () {
     type FunctionParamAnnotation = ();
 
     fn construct_function_param_annotation(
-        _token: Locatable<Token>,
-    ) -> Self::FunctionParamAnnotation {
-        ()
-    }
-
-    fn construct_function_param_annotation_full(
         _identifier_token: &Locatable<Token>,
         _colon_token: &Locatable<Token>,
         _type_node: &ASTTypeNode<Self>,
@@ -149,11 +130,7 @@ impl ASTAnnotation for () {
 
     type FunctionAnnotation = ();
 
-    fn construct_function_annotation(_token: Locatable<Token>) -> Self::FunctionAnnotation {
-        ()
-    }
-
-    fn construct_function_annotation_full(
+    fn construct_function_annotation(
         _fn_token: &Locatable<Token>,
         _name_token: &Locatable<Token>,
         _left_paren_token: &Locatable<Token>,
@@ -168,21 +145,11 @@ impl ASTAnnotation for () {
 
     type BlockAnnotation = ();
 
-    fn construct_block_annotation(_token: Locatable<Token>) -> Self::BlockAnnotation {
-        ()
-    }
-
-    fn construct_block_annotation_full(
+    fn construct_block_annotation(
         _left_brace_token: &Locatable<Token>,
         _statements: &[BlockItem<Self>],
         _right_brace_token: &Locatable<Token>,
     ) -> Self::BlockAnnotation {
-        ()
-    }
-
-    type BlockItemAnnotation = ();
-
-    fn construct_block_item_annotation(_token: Locatable<Token>) -> Self::BlockItemAnnotation {
         ()
     }
 
@@ -192,10 +159,6 @@ impl ASTAnnotation for () {
         _expr: &Expression<Self>,
         _semicolon_token: &Locatable<Token>,
     ) -> Self::StatementAnnotation {
-        ()
-    }
-
-    fn construct_statement_annotation(_token: Locatable<Token>) -> Self::StatementAnnotation {
         ()
     }
 
@@ -474,7 +437,7 @@ impl Parser {
             current_function_id = FunctionId(current_function_id.0 + 1);
         }
         let annotation =
-            Annotation::construct_program_annotation_full(&functions, &self.function_name_mapping);
+            Annotation::construct_program_annotation(&functions, &self.function_name_mapping);
         Ok(Program {
             functions,
             function_name_mapping: std::mem::take(&mut self.function_name_mapping),
@@ -531,7 +494,7 @@ impl Parser {
             self.variable_name_mapping
                 .insert(var_index, param_name.clone());
 
-            let param_annotation = Annotation::construct_function_param_annotation_full(
+            let param_annotation = Annotation::construct_function_param_annotation(
                 &param_identifier_token,
                 &param_colon_token,
                 &param_type,
@@ -555,7 +518,7 @@ impl Parser {
 
         let body = self.parse_block::<Annotation>()?;
 
-        let annotation = Annotation::construct_function_annotation_full(
+        let annotation = Annotation::construct_function_annotation(
             &fn_token,
             &name_token,
             &left_paren_token,
@@ -586,7 +549,7 @@ impl Parser {
 
         let right_brace_token = self.expect(Token::RBrace)?;
         self.variable_tracker.pop();
-        let annotation = Annotation::construct_block_annotation_full(
+        let annotation = Annotation::construct_block_annotation(
             &left_brace_token,
             &statements,
             &right_brace_token,
