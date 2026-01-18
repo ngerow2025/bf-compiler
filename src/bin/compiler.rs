@@ -1,6 +1,8 @@
 use compiler_bf_target::codegen::codegen_program;
 use compiler_bf_target::ir::generate_ir;
 use compiler_bf_target::ir2::generate_ir2;
+use compiler_bf_target::source_annotation::SourceAnnotation;
+use compiler_bf_target::sources::SourceCodeOrigin;
 use compiler_bf_target::type_check::type_annotate_program;
 use compiler_bf_target::ucodegen::BfGenerator;
 use compiler_bf_target::{
@@ -28,8 +30,12 @@ fn main() -> Result<()> {
     let mut lexer = Lexer::new(&source_code, Some(cli.source_file.clone()));
     let tokens = lexer.tokenize_with_locations()?;
 
-    let mut parser = parser::Parser::new(tokens);
-    let ast = parser.parse_program::<()>();
+    let mut source_annotator = SourceAnnotation {
+        source_code: SourceCodeOrigin::File(cli.source_file.into()),
+    };
+
+    let mut parser = parser::Parser::new(tokens, &mut source_annotator);
+    let ast = parser.parse_program();
 
     /*
     let type_checked = type_annotate_program(ast.clone().unwrap());

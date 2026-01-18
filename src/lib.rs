@@ -2,6 +2,8 @@ pub mod codegen;
 pub mod ir;
 pub mod ir2;
 pub mod parser;
+pub mod source_annotation;
+pub mod sources;
 pub mod tokenizer;
 pub mod type_check;
 pub mod ucodegen;

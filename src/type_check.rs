@@ -375,9 +375,14 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
             type_: Type::Str(value.len()),
             string_literal: value,
         },
-        Expression::Variable(VariableAccess { id, annotation: _ }) => TypedExpression::Variable {
-            type_: *variable_type_map.get(&id).expect("Variable not declared"),
-            variable: id,
+        Expression::VariableAccess {
+            value,
+            annotation: _,
+        } => TypedExpression::Variable {
+            type_: *variable_type_map
+                .get(&value.id)
+                .expect("Variable not declared"),
+            variable: value.id,
         },
         Expression::FnCall {
             name,
