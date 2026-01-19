@@ -7,3 +7,4 @@ pub mod sources;
 pub mod tokenizer;
 pub mod type_check;
 pub mod ucodegen;
+pub mod wasm_api;
