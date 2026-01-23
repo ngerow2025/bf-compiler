@@ -67,7 +67,6 @@ const CompilerExplorer = () => {
     const getTokensByLine = () => {
         const lines: TokenInfo[][] = [];
         let currentPos = 0;
-        let currentLine = 0;
 
         sourceCode.split('\n').forEach((line, lineIndex) => {
             lines[lineIndex] = [];
