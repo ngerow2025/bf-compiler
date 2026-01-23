@@ -43,7 +43,9 @@ RUN pnpm run build
 FROM nginxinc/nginx-unprivileged:1.25-alpine
 
 # Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx-config/mime.types /etc/nginx/conf.d/mime.types
+COPY nginx-config/nginx.conf /etc/nginx/conf.d/default.conf
+
 
 # Copy static output
 COPY --from=builder /app/dist /usr/share/nginx/html
