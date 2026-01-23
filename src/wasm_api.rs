@@ -9,7 +9,7 @@ use crate::source_annotation::SourceAnnotation;
 use crate::sources::SourceCodeOrigin;
 use crate::tokenizer::{Lexer, Locatable, Token};
 use crate::type_check::type_annotate_program;
-use crate::ucodegen::{UCodeProgram};
+use crate::ucodegen::UCodeProgram;
 
 #[derive(serde::Serialize)]
 struct TokenInfo {
