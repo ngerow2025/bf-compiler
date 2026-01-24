@@ -225,6 +225,7 @@ impl PhysicalLocationAllocator {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Ir2Instruction {
     Clear {
         target: PhysicalLocation,
@@ -329,6 +330,7 @@ pub enum Ir2Instruction {
     },
 }
 
+#[derive(Clone, Debug)]
 pub struct Ir2Function {
     pub code: Vec<Ir2Instruction>,
     pub metadata: Ir2FunctionMetadata,

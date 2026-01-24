@@ -1,11 +1,7 @@
 import { useState, useEffect } from "react";
 import { Panel, Group } from "react-resizable-panels";
 import { Code2, Cpu, Network } from "lucide-react";
-import {
-    tokenize_json,
-    compile_steps_json,
-    init
-} from "./wasm/compiler_bf_target.js";
+import * as bf_compiler from "./wasm/compiler_bf_target.js";
 
 interface TokenInfo {
     kind: string;
@@ -29,32 +25,29 @@ const CompilerExplorer = () => {
   let x: u8 = 65u8;
   std::out(x);
 }`);
-    const [tokens, setTokens] = useState<TokenInfo[]>([]);
-    const [compilationSteps, setCompilationSteps] =
-        useState<CompilationSteps | null>(null);
+    const [tokens, setTokens] = useState<bf_compiler.WasmTokens | null>(null);
+    const [ast, setAst] = useState<bf_compiler.WasmAst | null>(null);
     const [error, setError] = useState<string>("");
     const [hoverSpan, setHoverSpan] = useState<{ start: number; len: number } | null>(null);
 
     useEffect(() => {
-        init();
+        bf_compiler.init();
         compileSource(sourceCode);
     }, []);
 
     const compileSource = (source: string) => {
         try {
             setError("");
-            const tokensJson = tokenize_json(source);
-            const parsedTokens = JSON.parse(tokensJson);
-            setTokens(parsedTokens);
+            const tokens = bf_compiler.tokenize(source);
+            const ast = bf_compiler.parse(tokens, source);
 
-            const stepsJson = compile_steps_json(source);
-            const steps = JSON.parse(stepsJson);
-            setCompilationSteps(steps);
+            setTokens(tokens);
+            setAst(ast);
         } catch (e: any) {
             console.log(e)
             setError(e.toString());
-            setTokens([]);
-            setCompilationSteps(null);
+            setTokens(null);
+            setAst(null);
         }
     };
 
@@ -68,16 +61,22 @@ const CompilerExplorer = () => {
         const lines: TokenInfo[][] = [];
         let currentPos = 0;
 
+        if (!tokens) {
+            return lines;
+        }
+
         sourceCode.split('\n').forEach((line, lineIndex) => {
             lines[lineIndex] = [];
             const lineStart = currentPos;
             const lineEnd = currentPos + line.length;
 
-            tokens.forEach((token) => {
+            for(let i = 0; i < tokens.len; i++) {
+                const token = tokens.get(i);
+                if (!token) continue;
                 if (token.span_start >= lineStart && token.span_start < lineEnd) {
                     lines[lineIndex].push(token);
                 }
-            });
+            }
 
             currentPos = lineEnd + 1; // +1 for newline character
         });
@@ -147,7 +146,7 @@ const CompilerExplorer = () => {
                     <Panel defaultSize={33} minSize={20}>
                         <div className="h-full flex flex-col bg-[#252526] border-x border-white/5">
                             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
-                                <Cpu size={14} /> Tokens ({tokens.length})
+                                <Cpu size={14} /> Tokens ({tokens ? tokens.len : "-"})
                             </div>
                             <div className="flex-1 overflow-auto font-mono text-sm">
                                 <div className="p-4 space-y-0 inline-block min-w-full">
@@ -182,15 +181,14 @@ const CompilerExplorer = () => {
                                 <Network size={14} /> Compilation Output
                             </div>
                             <div className="flex-1 p-4 overflow-auto font-mono text-xs">
-                                {compilationSteps && (
+                                {ast && (
                                     <div className="space-y-4">
                                         <div>
                                             <div className="text-green-400 font-bold mb-1">
                                                 AST
                                             </div>
                                             <pre className="text-slate-300 whitespace-pre-wrap text-[10px]">
-                                                {compilationSteps.ast_debug}
-                                                ...
+                                                {ast.debug_string()}
                                             </pre>
                                         </div>
 

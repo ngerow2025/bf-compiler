@@ -416,6 +416,7 @@ impl BfGenerator {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct UCodeProgram {
     pub functions: HashMap<FunctionId, Vec<BfUcodeInstruction>>,
     pub entry_points: HashMap<FunctionId, LocationId>,
