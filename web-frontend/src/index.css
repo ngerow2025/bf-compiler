@@ -4,3 +4,49 @@ body {
   @apply bg-[#1e1e1e] text-slate-200 overflow-hidden;
   margin: 0;
 }
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-track-piece {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 7px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.35);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* Monaco Editor highlight decorations */
+.monaco-highlight-span {
+  background-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+.monaco-highlight-span-inline {
+  background-color: rgba(16, 185, 129, 0.4) !important;
+  color: #ecfdf5 !important;
+}
