@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use crate::codegen::{BfInstruction, codegen_program};
 use crate::ir::{IrFunction, generate_ir};
 use crate::ir2::{Ir2Function, generate_ir2};
-use crate::parser::FunctionId;
+use crate::parser::{Function, FunctionId};
 use crate::source_annotation::SourceAnnotation;
 use crate::sources::SourceCodeOrigin;
 use crate::tokenizer::{Lexer, Locatable, Token};
@@ -95,6 +95,11 @@ impl WasmAst {
 
     pub fn get_function_names(&self) -> Vec<String> {
         self.ast.functions.iter().map(|f| f.name.clone()).collect()
+    }
+
+    pub fn get_raw_func(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.ast.functions[0])
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn debug_string(&self) -> String {

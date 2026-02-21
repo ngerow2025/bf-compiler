@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use crate::{
     parser::{
         ASTAnnotation, ASTTypeKind, ASTTypeNode, Block, BlockItem, Expression, Function,
@@ -7,8 +9,9 @@ use crate::{
     tokenizer::{Locatable, Token},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SourceAnnotation {
+    #[serde(skip)]
     pub source_code: SourceCodeOrigin,
 }
 

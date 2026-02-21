@@ -4,6 +4,7 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
 // ============================================================================
 // TYPES
@@ -33,7 +34,6 @@ const DEFAULT_SOURCE_CODE = `fn main() {
   let x: u8 = 65u8;
   std::out(x);
 }`;
-
 
 const APP_VERSION = "v0.1.0";
 const APP_TITLE = "BF COMPILER EXPLORER";
@@ -154,7 +154,13 @@ interface TokenBadgeProps {
     onLeave?: () => void;
 }
 
-const TokenBadge = ({ type, value, color, onHover, onLeave }: TokenBadgeProps) => (
+const TokenBadge = ({
+    type,
+    value,
+    color,
+    onHover,
+    onLeave,
+}: TokenBadgeProps) => (
     <div
         className="inline-flex items-center gap-1.5 bg-white/5 px-1.5 py-0.5 rounded text-[11px] font-mono border border-transparent hover:border-blue-500/50 cursor-default transition-colors"
         onMouseEnter={onHover}
@@ -174,7 +180,11 @@ interface SourceEditorProps {
     onEditorMount: OnMount;
 }
 
-const SourceEditor = ({ sourceCode, onChange, onEditorMount }: SourceEditorProps) => (
+const SourceEditor = ({
+    sourceCode,
+    onChange,
+    onEditorMount,
+}: SourceEditorProps) => (
     <Panel defaultSize={33} minSize={20}>
         <div className="h-full flex flex-col bg-[#1e1e1e]">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
@@ -197,7 +207,8 @@ const SourceEditor = ({ sourceCode, onChange, onEditorMount }: SourceEditorProps
                         automaticLayout: true,
                         tabSize: 2,
                         wordWrap: "off",
-                        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, monospace",
+                        fontFamily:
+                            "'Fira Code', 'Cascadia Code', Consolas, monospace",
                         fontLigatures: true,
                         padding: { top: 16 },
                     }}
@@ -220,13 +231,24 @@ interface TokenStreamProps {
     error: string | null;
 }
 
-const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight, isCompiling, error }: TokenStreamProps) => (
+const TokenStream = ({
+    tokens,
+    tokensByLine,
+    onTokenHover,
+    scrollRef,
+    lineHeight,
+    isCompiling,
+    error,
+}: TokenStreamProps) => (
     <Panel defaultSize={33} minSize={20}>
         <div className="h-full flex flex-col bg-[#252526] border-x border-white/5">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
                 <Cpu size={14} /> Tokens ({tokens?.length ?? 0})
             </div>
-            <div ref={scrollRef} className="flex-1 overflow-auto font-mono text-sm">
+            <div
+                ref={scrollRef}
+                className="flex-1 overflow-auto font-mono text-sm"
+            >
                 {error && (
                     <div className="p-4 text-red-400 text-xs">
                         <div className="font-bold mb-1">Tokenization Error</div>
@@ -236,7 +258,10 @@ const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight
                 {isCompiling && !tokens && (
                     <div className="p-4 space-y-2">
                         {[...Array(5)].map((_, i) => (
-                            <div key={i} className="h-6 bg-white/5 rounded animate-pulse" />
+                            <div
+                                key={i}
+                                className="h-6 bg-white/5 rounded animate-pulse"
+                            />
                         ))}
                     </div>
                 )}
@@ -286,34 +311,191 @@ interface CompilationOutputProps {
     error: string | null;
 }
 
-const CompilationOutput = ({ compilationSteps, isCompiling, error }: CompilationOutputProps) => (
+const CompilationOutput = ({
+    compilationSteps,
+    isCompiling,
+    error,
+}: CompilationOutputProps) => (
     <Panel defaultSize={34} minSize={20}>
         <div className="h-full flex flex-col bg-[#1e1e1e]">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
                 <Network size={14} /> Compilation Output
             </div>
-            <div className="flex-1 p-4 overflow-auto font-mono text-xs">
+            <div className="flex-1 overflow-auto font-mono text-xs">
                 {error && (
-                    <div className="text-red-400 text-xs">
+                    <div className="text-red-400 text-xs h-full w-full p-4">
                         <div className="font-bold mb-1">Parsing Error</div>
                         <div className="whitespace-pre-wrap">{error}</div>
                     </div>
                 )}
                 {isCompiling && !compilationSteps && (
-                    <div className="space-y-2">
+                    <div className="space-y-2 h-full w-full p-4">
                         {[...Array(6)].map((_, i) => (
-                            <div key={i} className="h-4 bg-white/5 rounded animate-pulse" />
+                            <div
+                                key={i}
+                                className="h-4 bg-white/5 rounded animate-pulse"
+                            />
                         ))}
                     </div>
                 )}
                 {compilationSteps && (
-                    <div className="space-y-4">
-                        <div>
-                            <div className="text-green-400 font-bold mb-1">AST</div>
-                            <pre className="text-slate-300 whitespace-pre-wrap text-[10px]">
-                                {compilationSteps.ast_debug}
-                            </pre>
-                        </div>
+                    <div className="h-full w-full">
+                        <TransformWrapper
+                            limitToBounds={false}
+                            wheel={{
+                                step: 20,
+                                smoothStep: 0.001,
+                                disabled: false,
+                                activationKeys: [],
+                                excluded: [],
+                            }}
+                            pinch={{ step: 50, disabled: false, excluded: [] }}
+                            panning={{
+                                excluded: [],
+                                disabled: false,
+                                activationKeys: [],
+                            }}
+                            doubleClick={{ excluded: [], step: 0.7 }}
+                        >
+                            <TransformComponent
+                                wrapperStyle={{ width: "100%", height: "100%" }}
+                            >
+                                <svg
+                                    width="320"
+                                    height="420"
+                                    viewBox="0 0 320 420"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <defs>
+                                        <linearGradient
+                                            id="cardGradient"
+                                            x1="0"
+                                            y1="0"
+                                            x2="0"
+                                            y2="1"
+                                        >
+                                            <stop
+                                                offset="0%"
+                                                stop-color="#1e293b"
+                                            />
+                                            <stop
+                                                offset="100%"
+                                                stop-color="#0f172a"
+                                            />
+                                        </linearGradient>
+
+                                        <filter
+                                            id="shadow"
+                                            x="-20%"
+                                            y="-20%"
+                                            width="140%"
+                                            height="140%"
+                                        >
+                                            <feDropShadow
+                                                dx="0"
+                                                dy="8"
+                                                stdDeviation="16"
+                                                flood-color="#000"
+                                                flood-opacity="0.35"
+                                            />
+                                        </filter>
+                                    </defs>
+
+                                    <rect
+                                        x="20"
+                                        y="20"
+                                        width="280"
+                                        height="380"
+                                        rx="48"
+                                        fill="url(#cardGradient)"
+                                        filter="url(#shadow)"
+                                    />
+
+                                    <text
+                                        x="160"
+                                        y="90"
+                                        text-anchor="middle"
+                                        font-size="32"
+                                        font-weight="700"
+                                        fill="#e5e7eb"
+                                        font-family="Inter, system-ui, sans-serif"
+                                    >
+                                        Function
+                                    </text>
+
+                                    <line
+                                        x1="60"
+                                        y1="120"
+                                        x2="260"
+                                        y2="120"
+                                        stroke="#334155"
+                                        stroke-width="1"
+                                    />
+
+                                    <g font-family="Inter, system-ui, sans-serif">
+                                        <g transform="translate(70, 300)">
+                                            <text
+                                                x="0"
+                                                y="0"
+                                                font-size="14"
+                                                fill="#94a3b8"
+                                            >
+                                                ATTACK
+                                            </text>
+                                            <text
+                                                x="0"
+                                                y="32"
+                                                font-size="28"
+                                                font-weight="600"
+                                                fill="#f87171"
+                                            >
+                                                7
+                                            </text>
+                                        </g>
+
+                                        <g transform="translate(200, 300)">
+                                            <text
+                                                x="0"
+                                                y="0"
+                                                font-size="14"
+                                                fill="#94a3b8"
+                                            >
+                                                HEALTH
+                                            </text>
+                                            <text
+                                                x="0"
+                                                y="32"
+                                                font-size="28"
+                                                font-weight="600"
+                                                fill="#34d399"
+                                            >
+                                                12
+                                            </text>
+                                        </g>
+                                    </g>
+                                </svg>
+
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                                <br />
+                                <p>apple</p>
+                            </TransformComponent>
+                        </TransformWrapper>
                     </div>
                 )}
             </div>
@@ -329,15 +511,24 @@ const CompilationOutput = ({ compilationSteps, isCompiling, error }: Compilation
  * Main Compiler Explorer Application
  */
 const CompilerExplorer = () => {
-    const { sourceCode, tokens, ast, tokenizationError, parsingError, handleSourceChange } =
-        useCompiler(DEFAULT_SOURCE_CODE);
+    const {
+        sourceCode,
+        tokens,
+        ast,
+        tokenizationError,
+        parsingError,
+        handleSourceChange,
+    } = useCompiler(DEFAULT_SOURCE_CODE);
     const [hoverSpan, setHoverSpan] = useState<HoverSpan | null>(null);
     const [lineHeight, setLineHeight] = useState<number>(27);
 
     // Refs for Monaco editor and scroll synchronization
-    const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+    const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(
+        null,
+    );
     const tokenStreamRef = useRef<HTMLDivElement | null>(null);
-    const decorationsRef = useRef<monacoEditor.editor.IEditorDecorationsCollection | null>(null);
+    const decorationsRef =
+        useRef<monacoEditor.editor.IEditorDecorationsCollection | null>(null);
 
     // Determine if we're in a compiling state (no tokens yet means still compiling)
     const isCompiling = tokens === null && tokenizationError === null;
@@ -345,11 +536,13 @@ const CompilerExplorer = () => {
     // Handle Monaco editor mount
     const handleEditorMount: OnMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
-        
+
         // Get line height from editor options
-        const editorLineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight);
+        const editorLineHeight = editor.getOption(
+            monaco.editor.EditorOption.lineHeight,
+        );
         setLineHeight(editorLineHeight);
-        
+
         // Set up scroll synchronization
         editor.onDidScrollChange((e) => {
             if (tokenStreamRef.current) {
@@ -369,7 +562,7 @@ const CompilerExplorer = () => {
     // Update decorations when hoverSpan changes
     useEffect(() => {
         if (!editorRef.current) return;
-        
+
         if (decorationsRef.current) {
             decorationsRef.current.clear();
         }
@@ -378,22 +571,25 @@ const CompilerExplorer = () => {
             const model = editorRef.current.getModel();
             if (model) {
                 const startPos = model.getPositionAt(hoverSpan.start);
-                const endPos = model.getPositionAt(hoverSpan.start + hoverSpan.len);
-                
-                decorationsRef.current = editorRef.current.createDecorationsCollection([
-                    {
-                        range: {
-                            startLineNumber: startPos.lineNumber,
-                            startColumn: startPos.column,
-                            endLineNumber: endPos.lineNumber,
-                            endColumn: endPos.column,
+                const endPos = model.getPositionAt(
+                    hoverSpan.start + hoverSpan.len,
+                );
+
+                decorationsRef.current =
+                    editorRef.current.createDecorationsCollection([
+                        {
+                            range: {
+                                startLineNumber: startPos.lineNumber,
+                                startColumn: startPos.column,
+                                endLineNumber: endPos.lineNumber,
+                                endColumn: endPos.column,
+                            },
+                            options: {
+                                className: "monaco-highlight-span",
+                                inlineClassName: "monaco-highlight-span-inline",
+                            },
                         },
-                        options: {
-                            className: "monaco-highlight-span",
-                            inlineClassName: "monaco-highlight-span-inline",
-                        },
-                    },
-                ]);
+                    ]);
             }
         }
     }, [hoverSpan]);
@@ -424,7 +620,10 @@ const CompilerExplorer = () => {
             const lineEnd = currentPos + line.length;
 
             tokensArray.forEach((token) => {
-                if (token.span_start >= lineStart && token.span_start < lineEnd) {
+                if (
+                    token.span_start >= lineStart &&
+                    token.span_start < lineEnd
+                ) {
                     lines[lineIndex].push(token);
                 }
             });
@@ -444,6 +643,8 @@ const CompilerExplorer = () => {
         };
     }, [ast, tokensArray]);
 
+    console.log(ast?.get_raw_func());
+
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
             {/* Header */}
@@ -451,7 +652,9 @@ const CompilerExplorer = () => {
                 <h1 className="font-bold text-sm tracking-tight flex items-center gap-2">
                     <Cpu size={18} className="text-blue-400" />
                     {APP_TITLE}{" "}
-                    <span className="text-white/30 font-light">{APP_VERSION}</span>
+                    <span className="text-white/30 font-light">
+                        {APP_VERSION}
+                    </span>
                 </h1>
             </header>
 

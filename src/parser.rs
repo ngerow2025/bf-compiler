@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 
+use serde::Serialize;
+
 use crate::tokenizer::{Locatable, Token};
 
 // --- AST Definitions ---
 
 pub trait ASTAnnotation: Sized + Clone + Debug {
-    type ProgramAnnotation: Debug + Clone;
+    type ProgramAnnotation: Debug + Clone + Serialize;
     fn construct_program_annotation(
         &mut self,
         functions: &[Function<Self>],
         function_name_mapping: &HashMap<FunctionId, String>,
     ) -> Self::ProgramAnnotation;
-    type FunctionParamAnnotation: Debug + Clone;
+    type FunctionParamAnnotation: Debug + Clone + Serialize;
     fn construct_function_param_annotation(
         &mut self,
         identifier_token: &Locatable<Token>,
@@ -20,7 +22,7 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         type_node: &ASTTypeNode<Self>,
         variable_index: &VariableId,
     ) -> Self::FunctionParamAnnotation;
-    type FunctionAnnotation: Debug + Clone;
+    type FunctionAnnotation: Debug + Clone + Serialize;
     fn construct_function_annotation(
         &mut self,
         fn_token: &Locatable<Token>,
@@ -32,14 +34,14 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         body: &Block<Self>,
         function_id: &FunctionId,
     ) -> Self::FunctionAnnotation;
-    type BlockAnnotation: Debug + Clone;
+    type BlockAnnotation: Debug + Clone + Serialize;
     fn construct_block_annotation(
         &mut self,
         left_brace_token: &Locatable<Token>,
         statements: &[BlockItem<Self>],
         right_brace_token: &Locatable<Token>,
     ) -> Self::BlockAnnotation;
-    type StatementAnnotation: Debug + Clone;
+    type StatementAnnotation: Debug + Clone + Serialize;
     fn construct_expression_statement_annotation(
         &mut self,
         expr: &Expression<Self>,
@@ -63,7 +65,7 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         semicolon_token: &Locatable<Token>,
         variable_index: &VariableId,
     ) -> Self::StatementAnnotation;
-    type ExpressionAnnotation: Debug + Clone;
+    type ExpressionAnnotation: Debug + Clone + Serialize;
     fn construct_string_literal_annotation(
         &mut self,
         string_token: &Locatable<Token>,
@@ -95,14 +97,14 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         &mut self,
         variable_access: &VariableAccess<Self>,
     ) -> Self::ExpressionAnnotation;
-    type VariableAccessAnnotation: Debug + Clone;
+    type VariableAccessAnnotation: Debug + Clone + Serialize;
     fn construct_variable_access_annotation(
         &mut self,
         name_token: &Locatable<Token>,
         name: &str,
         variable_id: &VariableId,
     ) -> Self::VariableAccessAnnotation;
-    type QualifiedIdentifierAnnotation: Debug + Clone;
+    type QualifiedIdentifierAnnotation: Debug + Clone + Serialize;
     fn construct_qualified_identifier_annotation(
         &mut self,
         identifier_tokens: &[Locatable<Token>],
@@ -110,7 +112,7 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         parts: &[String],
         name: &str,
     ) -> Self::QualifiedIdentifierAnnotation;
-    type ASTTypeNodeAnnotation: Debug + Clone;
+    type ASTTypeNodeAnnotation: Debug + Clone + Serialize;
     fn construct_simple_type_node_annotation(
         &mut self,
         type_token: &Locatable<Token>,
@@ -303,21 +305,21 @@ impl ASTAnnotation for () {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Program<Annotation: ASTAnnotation> {
     pub functions: Vec<Function<Annotation>>,
     pub function_name_mapping: HashMap<FunctionId, String>,
     pub annotation: Annotation::ProgramAnnotation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FunctionParam<Annotation: ASTAnnotation> {
     pub type_: ASTTypeNode<Annotation>,
     pub variable_index: VariableId,
     pub annotation: Annotation::FunctionParamAnnotation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Function<Annotation: ASTAnnotation> {
     pub name: String,
     pub params: Vec<FunctionParam<Annotation>>,
@@ -327,7 +329,7 @@ pub struct Function<Annotation: ASTAnnotation> {
     pub annotation: Annotation::FunctionAnnotation,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct FunctionId(pub(crate) usize);
 
 impl Display for FunctionId {
@@ -336,19 +338,19 @@ impl Display for FunctionId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum BlockItem<Annotation: ASTAnnotation> {
     Statement(Statement<Annotation>),
     Block(Block<Annotation>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Block<Annotation: ASTAnnotation> {
     pub statements: Vec<BlockItem<Annotation>>,
     pub annotation: Annotation::BlockAnnotation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Statement<Annotation: ASTAnnotation> {
     // let x: type = expr;
     VarDecl {
@@ -372,7 +374,7 @@ pub enum Statement<Annotation: ASTAnnotation> {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum IntLiteral {
     U8(u8),
     I8(i8),
@@ -384,13 +386,13 @@ pub enum IntLiteral {
     I64(i64),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct VariableAccess<Annotation: ASTAnnotation> {
     pub id: VariableId,
     pub annotation: Annotation::VariableAccessAnnotation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Expression<Annotation: ASTAnnotation> {
     IntLiteral {
         value: IntLiteral,
@@ -428,7 +430,7 @@ impl<Annotation: ASTAnnotation> Expression<Annotation> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct VariableId(usize);
 
 pub struct QualifiedName<Annotation: ASTAnnotation> {
@@ -1156,13 +1158,13 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ASTTypeNode<Annotation: ASTAnnotation> {
     pub kind: ASTTypeKind,
     pub annotation: Annotation::ASTTypeNodeAnnotation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize)]
 pub enum ASTTypeKind {
     U8,
     I8,

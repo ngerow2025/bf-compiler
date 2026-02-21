@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use miette::SourceSpan;
+use serde::Serialize;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SourceLocation {
     pub span: SourceSpan,
-    pub origin: SourceCodeOrigin,
+    #[serde(skip)]
+    pub origin: Option<SourceCodeOrigin>,
 }
 
 impl SourceLocation {

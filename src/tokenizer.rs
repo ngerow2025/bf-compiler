@@ -300,7 +300,7 @@ impl<'a> Lexer<'a> {
                 Ok(t) => {
                     let loc = SourceLocation {
                         span: (lexer.span().start, lexer.span().end - lexer.span().start).into(),
-                        origin: self.origin.clone(),
+                        origin: Some(self.origin.clone()),
                     };
                     tokens.push(Locatable { value: t, loc });
                 }
