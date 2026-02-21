@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use miette::Report;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::codegen::{BfInstruction, codegen_program};
@@ -8,7 +10,7 @@ use crate::ir::{IrFunction, generate_ir};
 use crate::ir2::{Ir2Function, generate_ir2};
 use crate::parser::{Function, FunctionId};
 use crate::source_annotation::SourceAnnotation;
-use crate::sources::SourceCodeOrigin;
+use crate::sources::{SourceCodeOrigin, SourceLocation};
 use crate::tokenizer::{Lexer, Locatable, Token};
 use crate::type_check::{TypedProgram, type_annotate_program};
 use crate::ucodegen::UCodeProgram;
@@ -99,6 +101,11 @@ impl WasmAst {
 
     pub fn get_raw_func(&self) -> Result<JsValue, JsValue> {
         serde_wasm_bindgen::to_value(&self.ast.functions[0])
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn get_all_functions(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.ast.functions)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -388,10 +395,23 @@ fn bf_program_string(program: &[BfInstruction]) -> String {
 // Compilation Step Functions - Each returns an exported type
 // ============================================================================
 
+#[derive(Debug, Serialize)]
+struct TokenizationError {
+    error: Report,
+}
+
 /// Tokenize source code and return a WasmTokens object
 #[wasm_bindgen]
 pub fn tokenize(source: &str) -> Result<WasmTokens, JsValue> {
     let mut lexer = Lexer::new(source, None);
+    let tokens = lexer.tokenize_with_locations();
+    let tokens = match tokens {
+        Ok(toks) => toks,
+        Err(e) => {
+            let tokenization_error = TokenizationError { error: e };
+            return Err(serde_wasm_bindgen::to_value(&tokenization_error)?);
+        }
+    };
     let tokens = lexer
         .tokenize_with_locations()
         .map_err(|e| JsValue::from_str(&format!("tokenize error: {}", e)))?;
@@ -409,7 +429,7 @@ pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
     let mut parser = crate::parser::Parser::new(tokens.tokens.clone(), &mut source_annotator);
     let ast = parser
         .parse_program()
-        .map_err(|e| JsValue::from_str(&format!("parse error: {}", e)))?;
+        .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
 
     Ok(WasmAst {
         ast,

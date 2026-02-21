@@ -120,6 +120,7 @@ const useCompiler = (initialSource: string) => {
             const ast = bf_compiler.parse(tokenCompilation.tokens, sourceCode);
             return { ast, parsingError: null };
         } catch (e: unknown) {
+            console.log(typeof e);
             const errorMsg = e instanceof Error ? e.message : String(e);
             console.error("Parsing error:", e);
             return { ast: null, parsingError: errorMsg };
@@ -350,13 +351,15 @@ const CompilationOutput = ({
                                 activationKeys: [],
                                 excluded: [],
                             }}
-                            pinch={{ step: 50, disabled: false, excluded: [] }}
+                            pinch={{ step: 1000, disabled: false, excluded: [] }}
                             panning={{
                                 excluded: [],
                                 disabled: false,
                                 activationKeys: [],
                             }}
                             doubleClick={{ excluded: [], step: 0.7 }}
+                            maxScale={5000}
+                            minScale={0.1}
                         >
                             <TransformComponent
                                 wrapperStyle={{ width: "100%", height: "100%" }}
@@ -511,7 +514,7 @@ const CompilerExplorer = () => {
         };
     }, [ast, tokensArray]);
 
-    console.log(ast?.get_raw_func());
+    console.log(ast?.get_all_functions() as AstProgram);
 
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
@@ -552,6 +555,35 @@ const CompilerExplorer = () => {
             </main>
         </div>
     );
+};
+
+interface AstProgram {
+    functions: AstFunction[];
+}
+
+interface AstFunction {
+    name: string;
+    annotation: AstAnnotation,
+    body: AstBody,
+    id: number,
+    params: AstParam[],
+    variable_name_maping: Map<number, string>,
+}
+
+interface AstAnnotation {
+    span: {
+        offset: number;
+        length: number;
+    }
+}
+
+interface AstBody {
+    annotation: AstAnnotation,
+    statements: AstStatement[], 
+}
+
+interface AstParam {
+
 };
 
 export default CompilerExplorer;
