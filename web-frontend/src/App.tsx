@@ -4,6 +4,7 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
+import ProgramSVG from "./AST-svgs.tsx";
 
 // ============================================================================
 // TYPES
@@ -307,14 +308,7 @@ const CompilationOutput = ({ compilationSteps, isCompiling, error }: Compilation
                     </div>
                 )}
                 {compilationSteps && (
-                    <div className="space-y-4">
-                        <div>
-                            <div className="text-green-400 font-bold mb-1">AST</div>
-                            <pre className="text-slate-300 whitespace-pre-wrap text-[10px]">
-                                {compilationSteps.ast_debug}
-                            </pre>
-                        </div>
-                    </div>
+                        <ProgramSVG />
                 )}
             </div>
         </div>

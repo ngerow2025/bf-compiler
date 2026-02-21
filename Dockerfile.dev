@@ -1,0 +1,60 @@
+# Development Dockerfile with file watching for both Rust and frontend
+FROM rust:1.93-bookworm
+
+# Install Node.js 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs
+
+# Enable pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Install cargo-watch for Rust file watching
+RUN cargo install cargo-watch wasm-pack
+
+WORKDIR /app
+
+# Copy all project files
+COPY Cargo.toml Cargo.lock* ./
+COPY src ./src
+COPY web-frontend ./web-frontend
+
+# Install frontend dependencies
+WORKDIR /app/web-frontend
+RUN pnpm install
+
+# Switch back to app root
+WORKDIR /app
+
+# Create startup script that runs both watch processes
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Function to handle cleanup\n\
+cleanup() {\n\
+    echo "Shutting down..."\n\
+    kill $(jobs -p) 2>/dev/null || true\n\
+    exit 0\n\
+}\n\
+\n\
+trap cleanup SIGTERM SIGINT\n\
+\n\
+echo "Starting development servers..."\n\
+\n\
+# Start WASM watch build in background\n\
+echo "Starting Rust/WASM file watcher..."\n\
+cargo watch -i web-frontend -s "wasm-pack build --dev --target bundler --out-dir web-frontend/src/wasm --out-name compiler_bf_target" &\n\
+\n\
+# Give wasm-pack a moment to do initial build\n\
+sleep 5\n\
+\n\
+# Start frontend dev server in background\n\
+echo "Starting pnpm dev server..."\n\
+cd web-frontend && pnpm dev --host 0.0.0.0 &\n\
+\n\
+# Wait for all background processes\n\
+wait' > /app/start-dev.sh && chmod +x /app/start-dev.sh
+
+# Expose Vite dev server port
+EXPOSE 5173
+
+CMD ["/app/start-dev.sh"]
