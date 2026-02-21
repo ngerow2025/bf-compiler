@@ -1,0 +1,21 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: bf-compiler-dev
+    container_name: bf-compiler-dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./Cargo.toml:/app/Cargo.toml
+      - ./Cargo.lock:/app/Cargo.lock
+      - ./src:/app/src
+      - ./web-frontend:/app/web-frontend
+      - /app/web-frontend/node_modules
+      - /app/target
+    environment:
+      - CHOKIDAR_USEPOLLING=1
+      - WATCHPACK_POLLING=true
+    stdin_open: true
+    tty: true
