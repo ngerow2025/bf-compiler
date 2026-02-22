@@ -1,8 +1,14 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
+use std::num::IntErrorKind;
 
+use clap::error;
+use miette::{Diagnostic, NamedSource, SourceSpan};
 use serde::Serialize;
+use serde::ser::SerializeStruct;
+use thiserror::Error;
 
+use crate::sources::SourceCodeOrigin;
 use crate::tokenizer::{Locatable, Token};
 
 // --- AST Definitions ---
@@ -126,6 +132,114 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         size_token: &Locatable<Token>,
         right_angle_token: &Locatable<Token>,
     ) -> Self::ASTTypeNodeAnnotation;
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
+pub enum ParsingErrorKind {
+    // #[error("Invalid escape sequence: \\{0}")]
+    // InvalidEscapeSequence(char),
+    // #[error("Invalid character literal: {0}")]
+    // #[diagnostic(help(
+    //     "Character literals must be a single ASCII character enclosed in single quotes"
+    // ))]
+    // InvalidCharLiteral(char),
+    // #[error("Unexpected character encountered")]
+    // UnexpectedCharacter,
+    #[error("Unexpected token: expected {expected:?}, found {found:?}")]
+    WrongToken { expected: Token, found: Token },
+    #[error("Unexpected end of input")]
+    UnexpectedEOF,
+    #[error("Unexpected token, expected one of {expected:?}, found {found:?}")]
+    WrongTokenOneOf { expected: Vec<Token>, found: Token },
+    #[error("Expected identifier, found {found:?}")]
+    ExpectedIdentifier { found: Token },
+    #[error("Variable '{name}' already declared in this scope")]
+    VariableAlreadyDeclared { name: String },
+    #[error("Expected token type {expected:?}, found {found:?}")]
+    ExpectedTokenType { expected: String, found: Token },
+    #[error("Variable '{name}' not declared before assignment")]
+    VariableNotDeclared { name: String },
+    #[error("Expected expression, found {found:?}")]
+    ExpectedExpression { found: Token },
+    #[error("Expected integer literal, found {found:?}")]
+    ExpectedIntLiteral { found: Token },
+    #[error("Cannot parse integer literal '{literal}' as non-integer type {type_name}")]
+    InvalidIntLiteralTypeMismatch { literal: String, type_name: String },
+    #[error("Integer literal parsing error: {message}")]
+    InvalidIntLiteral { message: String },
+    #[error("Expected string literal, found {found:?}")]
+    ExpectedStringLiteral { found: Token },
+    #[error("Expected type token, found {found:?}")]
+    ExpectedType { found: Token },
+    #[default]
+    #[error("Unknown Parsing error")]
+    Other,
+}
+
+#[derive(Debug, Diagnostic, PartialEq, Clone)]
+pub struct ParsingError {
+    #[source_code]
+    pub src: NamedSource<String>,
+
+    #[label("error occurred here")]
+    pub span: SourceSpan,
+
+    // The specific error variant
+    #[diagnostic(transparent)]
+    pub kind: ParsingErrorKind,
+}
+
+impl Serialize for ParsingError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("ParsingError", 4)?;
+        state.serialize_field("src_name", &self.src.name())?;
+        state.serialize_field("src_code", &self.src.inner())?;
+        state.serialize_field("span", &self.span)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.end()
+    }
+}
+
+#[derive(Debug, Diagnostic, PartialEq, Clone, Error, Serialize)]
+#[error("Parsing pass failed with {} error(s)", errors.len())]
+pub struct ParsingErrorCollection {
+    #[related]
+    pub errors: Vec<ParsingError>,
+}
+
+pub type ParseResult<T> = std::result::Result<T, ParsingErrorCollection>;
+
+impl From<ParsingError> for ParsingErrorCollection {
+    fn from(value: ParsingError) -> Self {
+        Self {
+            errors: vec![value],
+        }
+    }
+}
+
+impl Default for ParsingError {
+    fn default() -> Self {
+        ParsingError {
+            src: NamedSource::new("input", String::new()),
+            span: SourceSpan::new(0.into(), 0),
+            kind: ParsingErrorKind::Other,
+        }
+    }
+}
+
+impl Display for ParsingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.kind, f)
+    }
+}
+
+impl std::error::Error for ParsingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.kind.source()
+    }
 }
 
 impl ASTAnnotation for () {
@@ -471,23 +585,53 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         self.tokens.get(self.pos + 1)
     }
 
+    fn last(&self) -> Option<&Locatable<Token>> {
+        if self.pos == 0 {
+            None
+        } else {
+            self.tokens.get(self.pos - 1)
+        }
+    }
+
     fn advance(&mut self) -> Option<Locatable<Token>> {
         let t = self.tokens.get(self.pos).cloned();
         self.pos += 1;
         t
     }
 
-    fn expect(&mut self, expected: Token) -> Result<Locatable<Token>, String> {
+    fn source_for_token(token: &Locatable<Token>) -> NamedSource<String> {
+        match &token.loc.origin {
+            Some(SourceCodeOrigin::File(filename)) => NamedSource::new(
+                filename.to_string(),
+                std::fs::read_to_string(&**filename)
+                    .unwrap_or_else(|_| format!("Could not read source file: {}", filename)),
+            ),
+            Some(SourceCodeOrigin::Anon(code)) => NamedSource::new("anonymous", code.to_string()),
+            None => NamedSource::new("input", String::new()),
+        }
+    }
+
+    fn expect(&mut self, expected: Token) -> ParseResult<Locatable<Token>> {
         if self.peek().map(|lt| &lt.value) == Some(&expected) {
             Ok(self.advance().unwrap())
         } else {
-            Err(format!("Expected {:?}, found {:?}", expected, self.peek()))
+            let found = self.peek().expect("Expected a token to be available");
+
+            return Err(ParsingError {
+                src: Self::source_for_token(found),
+                span: found.loc.span,
+                kind: ParsingErrorKind::WrongToken {
+                    expected,
+                    found: found.value.clone(),
+                },
+            }
+            .into());
         }
     }
 
     // --- Parsing Logic ---
 
-    pub fn parse_program(&mut self) -> Result<Program<Annotation>, String> {
+    pub fn parse_program(&mut self) -> ParseResult<Program<Annotation>> {
         let mut functions = Vec::new();
         let mut current_function_id = FunctionId(0);
         while self.peek().is_some() {
@@ -506,7 +650,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_function(&mut self, id: FunctionId) -> Result<Function<Annotation>, String> {
+    fn parse_function(&mut self, id: FunctionId) -> ParseResult<Function<Annotation>> {
         self.variable_index = VariableId(0);
         self.variable_tracker.clear();
         self.variable_tracker.push(HashMap::new());
@@ -516,9 +660,19 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let name_token = self.advance().expect("should have a name token");
 
-        let name = match name_token.value {
-            Token::Identifier(ref n) => n.clone(),
-            t => return Err(format!("Expected function name, found {:?}", t)),
+        let name = match &name_token.value {
+            Token::Identifier(n) => n.clone(),
+            t => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&name_token),
+                    span: name_token.loc.span,
+                    kind: ParsingErrorKind::WrongToken {
+                        expected: Token::Identifier("function_name".to_string()),
+                        found: t.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         self.function_name_mapping.insert(id, name.clone());
@@ -532,9 +686,19 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         while self.peek().map(|t| &t.value) != Some(&Token::RParen) {
             let param_identifier_token = self.advance().expect("should have a name token");
 
-            let param_name = match param_identifier_token.value {
-                Token::Identifier(ref n) => n.clone(),
-                t => return Err(format!("Expected parameter name, found {:?}", t)),
+            let param_name = match &param_identifier_token.value {
+                Token::Identifier(n) => n.clone(),
+                t => {
+                    return Err(ParsingError {
+                        src: Self::source_for_token(&param_identifier_token),
+                        span: param_identifier_token.loc.span,
+                        kind: ParsingErrorKind::WrongToken {
+                            expected: Token::Identifier("parameter_name".to_string()),
+                            found: t.clone(),
+                        },
+                    }
+                    .into());
+                }
             };
 
             let param_colon_token = self.expect(Token::Colon)?;
@@ -598,7 +762,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_block(&mut self) -> Result<Block<Annotation>, String> {
+    fn parse_block(&mut self) -> ParseResult<Block<Annotation>> {
         self.variable_tracker.push(HashMap::new());
         let left_brace_token = self.expect(Token::LBrace)?;
         let mut statements = Vec::new();
@@ -621,7 +785,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_statement_or_block(&mut self) -> Result<BlockItem<Annotation>, String> {
+    fn parse_statement_or_block(&mut self) -> ParseResult<BlockItem<Annotation>> {
         if self.peek().map(|t| &t.value) == Some(&Token::LBrace) {
             let block = self.parse_block()?;
             Ok(BlockItem::Block(block))
@@ -631,8 +795,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         }
     }
 
-    fn parse_statement(&mut self) -> Result<Statement<Annotation>, String> {
-        let token = self.peek().ok_or("Unexpected EOF")?;
+    fn parse_statement(&mut self) -> ParseResult<Statement<Annotation>> {
+        let token = self.peek().ok_or(ParsingError {
+            src: NamedSource::new("input", String::new()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
         match &token.value {
             Token::Let => self.parse_var_decl(),
             Token::Identifier(_) => {
@@ -671,14 +839,31 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         }
     }
 
-    fn parse_var_decl(&mut self) -> Result<Statement<Annotation>, String> {
+    fn parse_var_decl(&mut self) -> ParseResult<Statement<Annotation>> {
         // Grammar: "let" ID ":" Type "=" Expression ";"
-        let let_token = self.advance().ok_or("Expected 'let'")?;
+        let let_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
 
-        let identifier_token = self.advance().ok_or("Expected identifier")?;
+        let identifier_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
         let name = match identifier_token.value {
             Token::Identifier(ref n) => n.clone(),
-            _ => return Err(format!("Expected variable name")),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&identifier_token),
+                    span: identifier_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedIdentifier {
+                        found: identifier_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         let colon_token = self.expect(Token::Colon)?;
@@ -696,10 +881,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         // make sure that a variable of this name does not already exist in the current scope
         for scope in self.variable_tracker.iter().rev() {
             if scope.contains_key(&name) {
-                return Err(format!(
-                    "Variable '{}' already declared in this scope",
-                    name
-                ));
+                return Err(ParsingError {
+                    src: Self::source_for_token(&identifier_token),
+                    span: identifier_token.loc.span,
+                    kind: ParsingErrorKind::VariableAlreadyDeclared { name: name.clone() },
+                }
+                .into());
             }
         }
 
@@ -733,12 +920,25 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_assignment(&mut self) -> Result<Statement<Annotation>, String> {
+    fn parse_assignment(&mut self) -> ParseResult<Statement<Annotation>> {
         // Grammar: ID "=" Expression ";"
-        let identifier_token = self.advance().ok_or("Expected identifier")?;
+        let identifier_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
         let name = match identifier_token.value {
             Token::Identifier(ref n) => n.clone(),
-            _ => return Err("Expected identifier".into()),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&identifier_token),
+                    span: identifier_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedIdentifier {
+                        found: identifier_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         let equals_token = self.expect(Token::Equals)?;
@@ -755,10 +955,11 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 break;
             }
         }
-        let var_index = found_index.ok_or(format!(
-            "Variable '{}' not declared before assignment",
-            name
-        ))?;
+        let var_index = found_index.ok_or(ParsingError {
+            src: Self::source_for_token(&identifier_token),
+            span: identifier_token.loc.span,
+            kind: ParsingErrorKind::VariableNotDeclared { name: name.clone() },
+        })?;
         let annotation = Annotation::construct_assignment_annotation(
             self.annotation_processor,
             &identifier_token,
@@ -773,7 +974,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_function_call(&mut self) -> Result<Expression<Annotation>, String> {
+    fn parse_function_call(&mut self) -> ParseResult<Expression<Annotation>> {
         // Grammar: ID "(" ")" or ID ("::" ID)* "(" Arguments? ")"
         let qualified_name = self.parse_qualified_identifier()?;
         let name = qualified_name.parts.join("::");
@@ -814,28 +1015,56 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_qualified_identifier(&mut self) -> Result<QualifiedName<Annotation>, String> {
+    fn parse_qualified_identifier(&mut self) -> ParseResult<QualifiedName<Annotation>> {
         // Grammar: ID ("::" ID)*
         let mut parts = Vec::new();
         let mut identifier_tokens = Vec::new();
         let mut double_colon_tokens = Vec::new();
 
-        let first_token = self.advance().ok_or("Expected identifier")?;
+        let first_token = self.advance().ok_or(ParsingError {
+            src: NamedSource::new("input", String::new()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
         let first_name = match &first_token.value {
             Token::Identifier(n) => n.clone(),
-            _ => return Err("Expected identifier".into()),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&first_token),
+                    span: first_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedIdentifier {
+                        found: first_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
         parts.push(first_name);
         identifier_tokens.push(first_token);
 
         while self.peek().map(|t| &t.value) == Some(&Token::DoubleColon) {
             let double_colon_token = self.advance().unwrap();
+
+            let next_token = self.advance().ok_or(ParsingError {
+                src: Self::source_for_token(&double_colon_token),
+                span: double_colon_token.loc.span,
+                kind: ParsingErrorKind::UnexpectedEOF,
+            })?;
+
             double_colon_tokens.push(double_colon_token);
 
-            let next_token = self.advance().ok_or("Expected identifier after '::'")?;
             let next_name = match &next_token.value {
                 Token::Identifier(n) => n.clone(),
-                _ => return Err("Expected identifier after '::'".into()),
+                _ => {
+                    return Err(ParsingError {
+                        src: Self::source_for_token(&next_token),
+                        span: next_token.loc.span,
+                        kind: ParsingErrorKind::ExpectedIdentifier {
+                            found: next_token.value.clone(),
+                        },
+                    }
+                    .into());
+                }
             };
             parts.push(next_name);
             identifier_tokens.push(next_token);
@@ -854,8 +1083,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     // Returns the AST node AND its resolved type
-    fn parse_expression(&mut self) -> Result<Expression<Annotation>, String> {
-        let token = self.peek().ok_or("Unexpected EOF in expression")?;
+    fn parse_expression(&mut self) -> ParseResult<Expression<Annotation>> {
+        let token = self.peek().ok_or(ParsingError {
+            src: NamedSource::new("input", String::new()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
 
         match token.value {
             Token::IntLiteral(_) => self.parse_int_literal(),
@@ -879,75 +1112,205 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     }
                 }
             }
-            _ => Err(format!("Invalid token in expression: {:?}", token)),
+            _ => Err(ParsingError {
+                src: Self::source_for_token(token),
+                span: token.loc.span,
+                kind: ParsingErrorKind::ExpectedExpression {
+                    found: token.value.clone(),
+                },
+            }
+            .into()),
         }
     }
 
-    fn parse_int_literal(&mut self) -> Result<Expression<Annotation>, String> {
-        let int_token = self.advance().ok_or("Expected integer literal")?;
+    fn build_int_parse_error(
+        &self,
+        int_token: &Locatable<Token>,
+        type_: &ASTTypeNode<Annotation>,
+        parse_error: &std::num::ParseIntError,
+    ) -> String {
+        let int_str = match type_ {
+            ASTTypeNode {
+                kind: ASTTypeKind::U8,
+                ..
+            } => "u8",
+            ASTTypeNode {
+                kind: ASTTypeKind::I8,
+                ..
+            } => "i8",
+            ASTTypeNode {
+                kind: ASTTypeKind::U16,
+                ..
+            } => "u16",
+            ASTTypeNode {
+                kind: ASTTypeKind::I16,
+                ..
+            } => "i16",
+            ASTTypeNode {
+                kind: ASTTypeKind::U32,
+                ..
+            } => "u32",
+            ASTTypeNode {
+                kind: ASTTypeKind::I32,
+                ..
+            } => "i32",
+            ASTTypeNode {
+                kind: ASTTypeKind::U64,
+                ..
+            } => "u64",
+            ASTTypeNode {
+                kind: ASTTypeKind::I64,
+                ..
+            } => "i64",
+            _ => "unknown",
+        };
+
+        return match parse_error.kind() {
+            IntErrorKind::Empty => format!(
+                "Cannot parse integer literal: empty string cannot be parsed as {}",
+                int_str
+            ),
+            IntErrorKind::InvalidDigit => format!(
+                "Cannot parse integer literal: invalid digit for type {}",
+                int_str
+            ),
+            IntErrorKind::PosOverflow => format!(
+                "Cannot parse integer literal: value too large for type {}",
+                int_str
+            ),
+            IntErrorKind::NegOverflow => format!(
+                "Cannot parse integer literal: value too small for type {}",
+                int_str
+            ),
+            IntErrorKind::Zero => {
+                unreachable!("There is no non-zero types parsed for integer literals")
+            }
+            _ => unreachable!("Unknown IntErrorKind"),
+        };
+    }
+
+    fn parse_int_literal(&mut self) -> ParseResult<Expression<Annotation>> {
+        let int_token = self.advance().ok_or(ParsingError {
+            src: NamedSource::new("input", String::new()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
 
         let int_value = match &int_token.value {
             Token::IntLiteral(s) => s.clone(),
-            _ => return Err("Expected integer literal".into()),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedIntLiteral {
+                        found: int_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         let type_token = self.parse_type()?;
 
-        let parsed_value = match type_token.kind {
-            ASTTypeKind::U8 => IntLiteral::U8(int_value.parse::<u8>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as u8: {}",
-                    int_value, e
-                )
+        let parsed_value = match &type_token.kind {
+            ASTTypeKind::U8 => IntLiteral::U8((&int_value).parse::<u8>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::I8 => IntLiteral::I8(int_value.parse::<i8>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as i8: {}",
-                    int_value, e
-                )
+            ASTTypeKind::I8 => IntLiteral::I8((&int_value).parse::<i8>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::U16 => IntLiteral::U16(int_value.parse::<u16>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as u16: {}",
-                    int_value, e
-                )
+            ASTTypeKind::U16 => IntLiteral::U16((&int_value).parse::<u16>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::I16 => IntLiteral::I16(int_value.parse::<i16>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as i16: {}",
-                    int_value, e
-                )
+            ASTTypeKind::I16 => IntLiteral::I16((&int_value).parse::<i16>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::U32 => IntLiteral::U32(int_value.parse::<u32>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as u32: {}",
-                    int_value, e
-                )
+            ASTTypeKind::I16 => IntLiteral::I16((&int_value).parse::<i16>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::I32 => IntLiteral::I32(int_value.parse::<i32>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as i32: {}",
-                    int_value, e
-                )
+            ASTTypeKind::U32 => IntLiteral::U32((&int_value).parse::<u32>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::U64 => IntLiteral::U64(int_value.parse::<u64>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as u64: {}",
-                    int_value, e
-                )
+            ASTTypeKind::I32 => IntLiteral::I32((&int_value).parse::<i32>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            ASTTypeKind::I64 => IntLiteral::I64(int_value.parse::<i64>().map_err(|e| {
-                format!(
-                    "Failed to parse integer literal '{}' as i64: {}",
-                    int_value, e
-                )
+            ASTTypeKind::U64 => IntLiteral::U64((&int_value).parse::<u64>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
             })?),
-            _ => {
-                return Err(format!(
-                    "Invalid type for integer literal: {:?}",
-                    type_token.kind
-                ));
-            }
+            ASTTypeKind::I64 => IntLiteral::I64((&int_value).parse::<i64>().map_err(|e| {
+                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+                ParsingError {
+                    src: Self::source_for_token(&int_token),
+                    span: int_token.loc.span,
+                    kind: ParsingErrorKind::InvalidIntLiteral {
+                        message: error_message,
+                    },
+                }
+            })?),
+            _ => Err(ParsingError {
+                src: Self::source_for_token(&int_token),
+                span: int_token.loc.span,
+                kind: ParsingErrorKind::InvalidIntLiteralTypeMismatch {
+                    literal: int_value.clone(),
+                    type_name: format!("{:?}", type_token.kind),
+                },
+            })?,
         };
 
         let annotation = Annotation::construct_int_literal_annotation(
@@ -963,12 +1326,25 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_string_literal(&mut self) -> Result<Expression<Annotation>, String> {
-        let str_token = self.advance().ok_or("Expected string literal")?;
+    fn parse_string_literal(&mut self) -> ParseResult<Expression<Annotation>> {
+        let str_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
 
         let str_value = match &str_token.value {
             Token::StringLiteral(s) => s.clone(),
-            _ => return Err("Expected string literal".into()),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&str_token),
+                    span: str_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedStringLiteral {
+                        found: str_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         let annotation = Annotation::construct_string_literal_annotation(
@@ -982,7 +1358,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_array_access(&mut self) -> Result<Expression<Annotation>, String> {
+    fn parse_array_access(&mut self) -> ParseResult<Expression<Annotation>> {
         // Grammar: ID "[" Expression "]"
         let variable_access = self.parse_variable_access()?;
 
@@ -1007,13 +1383,26 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_variable_access(&mut self) -> Result<VariableAccess<Annotation>, String> {
+    fn parse_variable_access(&mut self) -> ParseResult<VariableAccess<Annotation>> {
         // Grammar: ID
-        let name_token = self.advance().ok_or("Expected identifier for variable")?;
+        let name_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
 
         let name = match &name_token.value {
             Token::Identifier(n) => n.clone(),
-            _ => return Err("Expected identifier for variable".into()),
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&name_token),
+                    span: name_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedIdentifier {
+                        found: name_token.value.clone(),
+                    },
+                }
+                .into());
+            }
         };
 
         // look for the existing variable index
@@ -1025,7 +1414,11 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             }
         }
 
-        let var_index = found_index.ok_or(format!("Variable '{}' not declared", name))?;
+        let var_index = found_index.ok_or(ParsingError {
+            src: Self::source_for_token(&name_token),
+            span: name_token.loc.span,
+            kind: ParsingErrorKind::VariableNotDeclared { name: name.clone() },
+        })?;
 
         Ok(VariableAccess {
             id: var_index,
@@ -1038,8 +1431,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })
     }
 
-    fn parse_type(&mut self) -> Result<ASTTypeNode<Annotation>, String> {
-        let t = self.advance().ok_or("Expected type")?;
+    fn parse_type(&mut self) -> ParseResult<ASTTypeNode<Annotation>> {
+        let t = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
         match t.value {
             Token::TypeU8 => {
                 let kind = ASTTypeKind::U8;
@@ -1132,12 +1529,23 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             Token::TypeStr => {
                 // Format: str<INT>
                 let left_angle = self.expect(Token::LAngle)?;
-                let size_token = self
-                    .advance()
-                    .ok_or("Expected integer literal for string size")?;
+                let size_token = self.advance().ok_or(ParsingError {
+                    src: Self::source_for_token(self.last().unwrap()),
+                    span: self.last().unwrap().loc.span,
+                    kind: ParsingErrorKind::UnexpectedEOF,
+                })?;
                 let size = match size_token.value {
                     Token::IntLiteral(ref n) => n.parse::<usize>().unwrap(),
-                    _ => return Err("Expected integer literal for string size".into()),
+                    _ => {
+                        return Err(ParsingError {
+                            src: Self::source_for_token(&size_token),
+                            span: size_token.loc.span,
+                            kind: ParsingErrorKind::ExpectedIntLiteral {
+                                found: size_token.value.clone(),
+                            },
+                        }
+                        .into());
+                    }
                 };
                 let right_angle = self.expect(Token::RAngle)?;
                 let kind = ASTTypeKind::Str(size);
@@ -1153,7 +1561,14 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     ),
                 })
             }
-            _ => Err(format!("Unknown type token: {:?}", t)),
+            _ => Err(ParsingError {
+                src: Self::source_for_token(&t),
+                span: t.loc.span,
+                kind: ParsingErrorKind::ExpectedType {
+                    found: t.value.clone(),
+                },
+            }
+            .into()),
         }
     }
 }

@@ -93,7 +93,7 @@ impl std::error::Error for LexingError {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Logos)]
+#[derive(Debug, PartialEq, Clone, Logos, Serialize)]
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(error(LexingError, callback = |lex| LexingError {
     src: NamedSource::new("input", lex.source().to_string()),
