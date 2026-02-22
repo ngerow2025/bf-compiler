@@ -974,7 +974,6 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
     };
 
     const buildQualifiedNameNode = (qualified_name: QualifiedName): TreeNode => {
-        console.log(qualified_name)
         return makeNode({
             title: "QualifiedName",
             subtitle: "struct QualifiedName",
@@ -1076,7 +1075,6 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
         }
 
         if ("FnCall" in expr) {
-            console.log(expr)
             const call = expr.FnCall;
             const children: TreeNode[] = [buildQualifiedNameNode(call.qualified_name)];
 

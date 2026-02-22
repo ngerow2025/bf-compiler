@@ -589,12 +589,9 @@ const CompilerExplorer = () => {
     }, [parsingErrors]);
 
     useEffect(() => {
-        console.log("running");
         if (!model || !editor || !monacoRef.current) return;
-        console.log("still running");
         const monaco = monacoRef.current;
         const markers = parsingErrorList.map((error) => {
-            console.log(JSON.stringify(error));
             const startPos = model.getPositionAt(
                 model.getOffsetAt({
                     lineNumber: error.line,
@@ -616,7 +613,6 @@ const CompilerExplorer = () => {
                 severity: monaco.MarkerSeverity.Error,
             };
         });
-        console.log(markers);
         monaco.editor.setModelMarkers(model, "bf-compiler", markers);
     }, [model, editor, parsingErrorList]);
 
@@ -713,10 +709,6 @@ const CompilerExplorer = () => {
     }, [ast, tokensArray]) as
         | { tokens: TokenInfo[]; ast: AstProgramPayload }
         | null;
-
-    console.log(
-        ast?.get_all_functions() as AstProgramPayload,
-    );
 
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
