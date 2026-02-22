@@ -385,10 +385,11 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
             variable: value.id,
         },
         Expression::FnCall {
-            name,
+            qualified_name,
             arguments,
             annotation: _,
         } => {
+            let name = qualified_name.full_name();
             let function_id = *function_name_map
                 .get(&name)
                 .unwrap_or_else(|| panic!("unknown function {name}"));

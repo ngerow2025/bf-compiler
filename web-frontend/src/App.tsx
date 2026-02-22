@@ -4,7 +4,7 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
-import ProgramSVG from "./AST-svgs.tsx";
+import { ASTTreeVisualization } from "./AST-svgs.tsx";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
 // ============================================================================
@@ -19,13 +19,133 @@ interface TokenInfo {
 
 interface CompilationSteps {
     tokens: TokenInfo[];
-    ast_debug: string;
+    ast: AstProgramPayload;
 }
 
 interface HoverSpan {
-    start: number;
-    len: number;
+    offset: number;
+    length: number;
 }
+
+interface ParsingErrorInfo {
+    line: number;
+    column: number;
+    message: string;
+    length: number;
+}
+
+interface ParsingErrorSpan {
+    offset: number;
+    length: number;
+}
+
+type ParsingErrorKind = Record<string, unknown>;
+
+interface ParsingErrorPayload {
+    src_name: string;
+    src_code: string;
+    span: ParsingErrorSpan;
+    kind: ParsingErrorKind;
+}
+
+interface ParsingErrorCollection {
+    errors: ParsingErrorPayload[];
+}
+
+type ParsingErrors = ParsingErrorPayload | ParsingErrorCollection | ParsingErrorInfo[];
+
+interface CompilerState {
+    sourceCode: string;
+    tokens: ReturnType<typeof bf_compiler.tokenize> | null;
+    ast: ReturnType<typeof bf_compiler.parse> | null;
+    tokenizationError: string | null;
+    parsingErrors: ParsingErrors | null;
+    handleSourceChange: (newSource: string) => void;
+}
+
+const isParsingErrorPayload = (value: unknown): value is ParsingErrorPayload =>
+    typeof value === "object" &&
+    value !== null &&
+    "src_name" in value &&
+    "src_code" in value &&
+    "span" in value &&
+    "kind" in value;
+
+const isParsingErrorCollection = (
+    value: unknown,
+): value is ParsingErrorCollection =>
+    typeof value === "object" &&
+    value !== null &&
+    "errors" in value &&
+    Array.isArray((value as { errors?: unknown }).errors);
+
+const getLineColumnFromOffset = (
+    source: string,
+    offset: number,
+): { line: number; column: number } => {
+    const safeOffset = Math.max(0, Math.min(offset, source.length));
+    const upToOffset = source.slice(0, safeOffset);
+    const lines = upToOffset.split("\n");
+    return {
+        line: lines.length,
+        column: lines[lines.length - 1].length + 1,
+    };
+};
+
+const normalizeParsingError = (
+    error: ParsingErrorPayload,
+): ParsingErrorInfo => {
+    const { line, column } = getLineColumnFromOffset(
+        error.src_code,
+        error.span.offset,
+    );
+    return {
+        line,
+        column,
+        length: Math.max(1, error.span.length),
+        message: formatParsingErrorKind(error.kind),
+    };
+};
+
+const formatParsingErrorKind = (kind: ParsingErrorKind): string => {
+    if (typeof kind !== "object" || kind === null) {
+        return String(kind);
+    }
+
+    if ("ExpectedExpression" in kind) {
+        const payload = (kind as { ExpectedExpression?: { found?: unknown } })
+            .ExpectedExpression;
+        const found = payload?.found;
+        const foundText = formatFoundToken(found);
+        return `Expected expression, found ${foundText}`;
+    }
+
+    return JSON.stringify(kind);
+};
+
+const formatFoundToken = (found: unknown): string => {
+    if (typeof found === "string") return found;
+    if (typeof found !== "object" || found === null) return String(found);
+
+    const entries = Object.entries(found as Record<string, unknown>);
+    if (entries.length === 0) return "unknown token";
+
+    const [tokenName, tokenValue] = entries[0];
+    if (tokenName === "CharLiteral" && typeof tokenValue === "string") {
+        return `'${escapeControlChars(tokenValue)}'`;
+    }
+    if (typeof tokenValue === "string") {
+        return `${tokenName} '${escapeControlChars(tokenValue)}'`;
+    }
+    return tokenName;
+};
+
+const escapeControlChars = (value: string): string =>
+    value
+        .replace(/\\/g, "\\\\")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
 
 // ============================================================================
 // CONSTANTS
@@ -91,7 +211,7 @@ const getTokenColor = (kind: string): string => {
     return TOKEN_COLOR_MAP[kind] ?? "text-slate-400";
 };
 
-const useCompiler = (initialSource: string) => {
+const useCompiler = (initialSource: string): CompilerState => {
     const [sourceCode, setSourceCode] = useState(initialSource);
 
     // Initialize WASM once
@@ -114,16 +234,14 @@ const useCompiler = (initialSource: string) => {
     // Stage 2: AST Parsing - only runs when tokens change
     const astCompilation = useMemo(() => {
         if (!tokenCompilation.tokens) {
-            return { ast: null, parsingError: null };
+            return { ast: null, parsingErrors: null };
         }
         try {
             const ast = bf_compiler.parse(tokenCompilation.tokens, sourceCode);
-            return { ast, parsingError: null };
+            return { ast, parsingErrors: null };
         } catch (e: unknown) {
-            console.log(e);
-            const errorMsg = e instanceof Error ? e.message : String(e);
             console.error("Parsing error:", e);
-            return { ast: null, parsingError: errorMsg };
+            return { ast: null, parsingErrors: e as ParsingErrors };
         }
     }, [tokenCompilation.tokens, sourceCode]);
 
@@ -136,7 +254,7 @@ const useCompiler = (initialSource: string) => {
         tokens: tokenCompilation.tokens,
         ast: astCompilation.ast,
         tokenizationError: tokenCompilation.tokenizationError,
-        parsingError: astCompilation.parsingError,
+        parsingErrors: astCompilation.parsingErrors,
         handleSourceChange,
     };
 };
@@ -152,6 +270,7 @@ interface TokenBadgeProps {
     type: string;
     value?: string;
     color: string;
+    isHighlighted?: boolean;
     onHover?: () => void;
     onLeave?: () => void;
 }
@@ -160,11 +279,16 @@ const TokenBadge = ({
     type,
     value,
     color,
+    isHighlighted,
     onHover,
     onLeave,
 }: TokenBadgeProps) => (
     <div
-        className="inline-flex items-center gap-1.5 bg-white/5 px-1.5 py-0.5 rounded text-[11px] font-mono border border-transparent hover:border-blue-500/50 cursor-default transition-colors"
+        className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-mono border cursor-default transition-colors ${
+            isHighlighted
+                ? "bg-blue-500/25 border-blue-400/80"
+                : "bg-white/5 border-transparent hover:border-blue-500/50"
+        }`}
         onMouseEnter={onHover}
         onMouseLeave={onLeave}
     >
@@ -186,39 +310,41 @@ const SourceEditor = ({
     sourceCode,
     onChange,
     onEditorMount,
-}: SourceEditorProps) => (
-    <Panel defaultSize={33} minSize={20}>
-        <div className="h-full flex flex-col bg-[#1e1e1e]">
-            <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
-                <Code2 size={14} /> Source Code
+}: SourceEditorProps) => {
+    return (
+        <Panel defaultSize={33} minSize={20}>
+            <div className="h-full flex flex-col bg-[#1e1e1e]">
+                <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
+                    <Code2 size={14} /> Source Code
+                </div>
+                <div className="flex-1 overflow-hidden">
+                    <Editor
+                        height="100%"
+                        defaultLanguage="rust"
+                        theme="vs-dark"
+                        value={sourceCode}
+                        onChange={(value) => onChange(value ?? "")}
+                        onMount={onEditorMount}
+                        options={{
+                            minimap: { enabled: false },
+                            fontSize: 14,
+                            lineHeight: 27,
+                            lineNumbers: "on",
+                            scrollBeyondLastLine: false,
+                            automaticLayout: true,
+                            tabSize: 2,
+                            wordWrap: "off",
+                            fontFamily:
+                                "'Fira Code', 'Cascadia Code', Consolas, monospace",
+                            fontLigatures: true,
+                            padding: { top: 16 },
+                        }}
+                    />
+                </div>
             </div>
-            <div className="flex-1 overflow-hidden">
-                <Editor
-                    height="100%"
-                    defaultLanguage="rust"
-                    theme="vs-dark"
-                    value={sourceCode}
-                    onChange={(value) => onChange(value ?? "")}
-                    onMount={onEditorMount}
-                    options={{
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        lineHeight: 27,
-                        lineNumbers: "on",
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        tabSize: 2,
-                        wordWrap: "off",
-                        fontFamily:
-                            "'Fira Code', 'Cascadia Code', Consolas, monospace",
-                        fontLigatures: true,
-                        padding: { top: 16 },
-                    }}
-                />
-            </div>
-        </div>
-    </Panel>
-);
+        </Panel>
+    );
+};
 
 /**
  * Token Stream Panel - displays tokenized code
@@ -226,6 +352,7 @@ const SourceEditor = ({
 interface TokenStreamProps {
     tokens: TokenInfo[] | null;
     tokensByLine: TokenInfo[][] | null;
+    hoverSpan: HoverSpan | null;
     onTokenHover: (span: HoverSpan | null) => void;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     lineHeight: number;
@@ -236,6 +363,7 @@ interface TokenStreamProps {
 const TokenStream = ({
     tokens,
     tokensByLine,
+    hoverSpan,
     onTokenHover,
     scrollRef,
     lineHeight,
@@ -285,10 +413,16 @@ const TokenStream = ({
                                             type={token.kind}
                                             value={token.value}
                                             color={getTokenColor(token.kind)}
+                                            isHighlighted={
+                                                !!hoverSpan &&
+                                                token.span_start >= hoverSpan.offset &&
+                                                token.span_start + token.span_len <=
+                                                    hoverSpan.offset + hoverSpan.length
+                                            }
                                             onHover={() =>
                                                 onTokenHover({
-                                                    start: token.span_start,
-                                                    len: token.span_len,
+                                                    offset: token.span_start,
+                                                    length: token.span_len,
                                                 })
                                             }
                                             onLeave={() => onTokenHover(null)}
@@ -310,13 +444,15 @@ const TokenStream = ({
 interface CompilationOutputProps {
     compilationSteps: CompilationSteps | null;
     isCompiling: boolean;
-    error: string | null;
+    errors: any;
+    onNodeHover: (span: HoverSpan | null) => void;
 }
 
 const CompilationOutput = ({
     compilationSteps,
     isCompiling,
-    error,
+    errors,
+    onNodeHover,
 }: CompilationOutputProps) => (
     <Panel defaultSize={34} minSize={20}>
         <div className="h-full flex flex-col bg-[#1e1e1e]">
@@ -324,10 +460,9 @@ const CompilationOutput = ({
                 <Network size={14} /> Compilation Output
             </div>
             <div className="flex-1 overflow-auto font-mono text-xs">
-                {error && (
+                {errors && (
                     <div className="text-red-400 text-xs h-full w-full p-4">
-                        <div className="font-bold mb-1">Parsing Error</div>
-                        <div className="whitespace-pre-wrap">{error}</div>
+                        <div className="font-bold text-lg mb-1">There are {errors.errors.length} Parsing Errors</div>
                     </div>
                 )}
                 {isCompiling && !compilationSteps && (
@@ -351,7 +486,11 @@ const CompilationOutput = ({
                                 activationKeys: [],
                                 excluded: [],
                             }}
-                            pinch={{ step: 1000, disabled: false, excluded: [] }}
+                            pinch={{
+                                step: 1000,
+                                disabled: false,
+                                excluded: [],
+                            }}
                             panning={{
                                 excluded: [],
                                 disabled: false,
@@ -364,7 +503,11 @@ const CompilationOutput = ({
                             <TransformComponent
                                 wrapperStyle={{ width: "100%", height: "100%" }}
                             >
-                                <ProgramSVG />
+                                <ASTTreeVisualization
+                                    payload={compilationSteps.ast}
+                                    onNodeHover={onNodeHover}
+                                    key={JSON.stringify(compilationSteps.ast)}
+                                />
                             </TransformComponent>
                         </TransformWrapper>
                     </div>
@@ -387,12 +530,18 @@ const CompilerExplorer = () => {
         tokens,
         ast,
         tokenizationError,
-        parsingError,
+        parsingErrors,
         handleSourceChange,
     } = useCompiler(DEFAULT_SOURCE_CODE);
     const [hoverSpan, setHoverSpan] = useState<HoverSpan | null>(null);
     const [lineHeight, setLineHeight] = useState<number>(27);
 
+    const [editor, setEditor] =
+        useState<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+    const [model, setModel] = useState<monacoEditor.editor.ITextModel | null>(
+        null,
+    );
+    const monacoRef = useRef<typeof monacoEditor | null>(null);
     // Refs for Monaco editor and scroll synchronization
     const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(
         null,
@@ -407,6 +556,7 @@ const CompilerExplorer = () => {
     // Handle Monaco editor mount
     const handleEditorMount: OnMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
+        monacoRef.current = monaco;
 
         // Get line height from editor options
         const editorLineHeight = editor.getOption(
@@ -420,7 +570,55 @@ const CompilerExplorer = () => {
                 tokenStreamRef.current.scrollTop = e.scrollTop;
             }
         });
+
+        const model = editor.getModel();
+        setModel(model);
+        setEditor(editor);
     }, []);
+
+    const parsingErrorList = useMemo<ParsingErrorInfo[]>(() => {
+        if (!parsingErrors) return [];
+        if (Array.isArray(parsingErrors)) return parsingErrors;
+        if (isParsingErrorCollection(parsingErrors)) {
+            return parsingErrors.errors.map(normalizeParsingError);
+        }
+        if (isParsingErrorPayload(parsingErrors)) {
+            return [normalizeParsingError(parsingErrors)];
+        }
+        return [];
+    }, [parsingErrors]);
+
+    useEffect(() => {
+        console.log("running");
+        if (!model || !editor || !monacoRef.current) return;
+        console.log("still running");
+        const monaco = monacoRef.current;
+        const markers = parsingErrorList.map((error) => {
+            console.log(JSON.stringify(error));
+            const startPos = model.getPositionAt(
+                model.getOffsetAt({
+                    lineNumber: error.line,
+                    column: error.column,
+                }),
+            );
+            const endPos = model.getPositionAt(
+                model.getOffsetAt({
+                    lineNumber: error.line,
+                    column: error.column,
+                }) + error.length,
+            );
+            return {
+                startLineNumber: startPos.lineNumber,
+                endLineNumber: endPos.lineNumber,
+                startColumn: startPos.column,
+                endColumn: endPos.column,
+                message: error.message,
+                severity: monaco.MarkerSeverity.Error,
+            };
+        });
+        console.log(markers);
+        monaco.editor.setModelMarkers(model, "bf-compiler", markers);
+    }, [model, editor, parsingErrorList]);
 
     // Sync token stream scroll when tokens change
     useEffect(() => {
@@ -441,9 +639,9 @@ const CompilerExplorer = () => {
         if (hoverSpan) {
             const model = editorRef.current.getModel();
             if (model) {
-                const startPos = model.getPositionAt(hoverSpan.start);
+                const startPos = model.getPositionAt(hoverSpan.offset);
                 const endPos = model.getPositionAt(
-                    hoverSpan.start + hoverSpan.len,
+                    hoverSpan.offset + hoverSpan.length,
                 );
 
                 decorationsRef.current =
@@ -510,11 +708,15 @@ const CompilerExplorer = () => {
         if (!ast || !tokensArray) return null;
         return {
             tokens: tokensArray,
-            ast_debug: ast.debug_string(),
+            ast: ast.get_all_functions(),
         };
-    }, [ast, tokensArray]);
+    }, [ast, tokensArray]) as
+        | { tokens: TokenInfo[]; ast: AstProgramPayload }
+        | null;
 
-    console.log(ast?.get_all_functions() as AstProgram);
+    console.log(
+        ast?.get_all_functions() as AstProgramPayload,
+    );
 
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
@@ -540,6 +742,7 @@ const CompilerExplorer = () => {
                     <TokenStream
                         tokens={tokensArray}
                         tokensByLine={tokensByLine}
+                        hoverSpan={hoverSpan}
                         onTokenHover={setHoverSpan}
                         scrollRef={tokenStreamRef}
                         lineHeight={lineHeight}
@@ -548,8 +751,9 @@ const CompilerExplorer = () => {
                     />
                     <CompilationOutput
                         compilationSteps={compilationSteps}
-                        isCompiling={ast === null && parsingError === null}
-                        error={parsingError}
+                        isCompiling={ast === null && parsingErrors === null}
+                        errors={parsingErrors}
+                        onNodeHover={setHoverSpan}
                     />
                 </Group>
             </main>
@@ -557,33 +761,122 @@ const CompilerExplorer = () => {
     );
 };
 
-interface AstProgram {
-    functions: AstFunction[];
+// Full AST Program structure from WASM
+export interface Span {
+    offset: number;
+    length: number;
 }
 
-interface AstFunction {
+export interface SimpleAnnotation {
+    span: Span;
+}
+
+export interface IntLiteralValue {
+    U8?: number;
+    I8?: number;
+    U16?: number;
+    I16?: number;
+    U32?: number;
+    I32?: number;
+    U64?: number;
+    I64?: number;
+}
+
+export interface AstIntLiteral {
+    value: IntLiteralValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstVariableAccessValue {
+    id: number;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstVariableAccessExpr {
+    value: AstVariableAccessValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstStringLiteralExpr {
+    value: string;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstArrayAccessExpr {
+    array: AstVariableAccessValue;
+    index_expr: AstExpressionValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFnCallExpr {
+    qualified_name: QualifiedName;
+    arguments: AstExpressionValue[];
+    annotation: SimpleAnnotation;
+}
+
+export type AstExpressionValue =
+    | { IntLiteral: AstIntLiteral }
+    | { StringLiteral: AstStringLiteralExpr }
+    | { VariableAccess: AstVariableAccessExpr }
+    | { ArrayAccess: AstArrayAccessExpr }
+    | { FnCall: AstFnCallExpr };
+
+export interface AstVarDeclStmt {
     name: string;
-    annotation: AstAnnotation,
-    body: AstBody,
-    id: number,
-    params: AstParam[],
-    variable_name_maping: Map<number, string>,
+    type_: { kind: string; annotation: SimpleAnnotation };
+    value: AstExpressionValue;
+    variable_index: number;
+    annotation: SimpleAnnotation;
 }
 
-interface AstAnnotation {
-    span: {
-        offset: number;
-        length: number;
-    }
+export interface AstExpressionStmt {
+    expr: AstExpressionValue;
+    annotation: SimpleAnnotation;
 }
 
-interface AstBody {
-    annotation: AstAnnotation,
-    statements: AstStatement[],
+export interface AstAssignmentStmt {
+    var: number;
+    value: AstExpressionValue;
+    annotation: SimpleAnnotation;
 }
 
-interface AstParam {
+export type AstBlockItem =
+    | {
+          Statement: {
+              VarDecl?: AstVarDeclStmt;
+              Expression?: AstExpressionStmt;
+              Assignment?: AstAssignmentStmt;
+          };
+      }
+    | {
+          Block: AstBlockBody;
+      };
 
-};
+export interface AstBlockBody {
+    statements: AstBlockItem[];
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFunctionParam {
+    type_: { kind: string; annotation: SimpleAnnotation };
+    variable_index: number;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFunctionPayload {
+    name: QualifiedName;
+    params: AstFunctionParam[];
+    body: AstBlockBody;
+    id: number;
+    variable_name_mapping: Record<string, number>;
+    annotation: SimpleAnnotation;
+}
+
+export interface QualifiedName {
+    parts: string[];
+    annotation: SimpleAnnotation;
+}
+
+export type AstProgramPayload = AstFunctionPayload[];
 
 export default CompilerExplorer;

@@ -526,7 +526,7 @@ pub enum Expression<Annotation: ASTAnnotation> {
         annotation: Annotation::ExpressionAnnotation,
     },
     FnCall {
-        name: String,
+        qualified_name: QualifiedName<Annotation>,
         arguments: Vec<Expression<Annotation>>,
         annotation: Annotation::ExpressionAnnotation,
     },
@@ -547,9 +547,16 @@ impl<Annotation: ASTAnnotation> Expression<Annotation> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct VariableId(usize);
 
+#[derive(Debug, Clone, Serialize)]
 pub struct QualifiedName<Annotation: ASTAnnotation> {
     pub parts: Vec<String>,
     pub annotation: Annotation::QualifiedIdentifierAnnotation,
+}
+
+impl<Annotation: ASTAnnotation> QualifiedName<Annotation> {
+    pub fn full_name(&self) -> String {
+        self.parts.join("::")
+    }
 }
 
 pub struct Parser<'a, Annotation: ASTAnnotation> {
@@ -1009,7 +1016,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             &right_paren,
         );
         Ok(Expression::FnCall {
-            name,
+            qualified_name,
             arguments: args,
             annotation,
         })
