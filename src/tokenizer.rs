@@ -2,14 +2,16 @@ use std::sync::Arc;
 use std::{fmt::Display, ops::Deref};
 
 use logos::Logos;
-use miette::{Diagnostic, NamedSource, Result, SourceSpan};
+use miette::{Diagnostic, NamedSource, SourceCode, SourceSpan};
+use serde::Serialize;
+use serde::ser::SerializeStruct;
 use thiserror::Error;
 
 use crate::sources::{SourceCodeOrigin, SourceLocation};
 
 // --- Data Structures ---
 
-#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic)]
+#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum LexingErrorKind {
     #[error("Invalid escape sequence: \\{0}")]
     InvalidEscapeSequence(char),
@@ -38,11 +40,35 @@ pub struct LexingError {
     pub kind: LexingErrorKind,
 }
 
-#[derive(Debug, Diagnostic, PartialEq, Clone, Error)]
+impl Serialize for LexingError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("LexingError", 4)?;
+        state.serialize_field("src_name", &self.src.name())?;
+        state.serialize_field("src_code", &self.src.inner())?;
+        state.serialize_field("span", &self.span)?;
+        state.serialize_field("kind", &self.kind)?;
+        state.end()
+    }
+}
+
+#[derive(Debug, Diagnostic, PartialEq, Clone, Error, Serialize)]
 #[error("Lexing pass failed with {} error(s)", errors.len())]
 pub struct LexingErrorCollection {
     #[related]
     pub errors: Vec<LexingError>,
+}
+
+pub type LexResult<T> = std::result::Result<T, LexingErrorCollection>;
+
+impl From<LexingError> for LexingErrorCollection {
+    fn from(value: LexingError) -> Self {
+        Self {
+            errors: vec![value],
+        }
+    }
 }
 
 impl Default for LexingError {
@@ -137,7 +163,7 @@ pub enum Token {
     CharLiteral(char),
 }
 
-fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
+fn parse_string(lex: &mut logos::Lexer<Token>) -> std::result::Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
@@ -173,7 +199,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> Result<String, LexingError> {
     Ok(result)
 }
 
-fn parse_char(lex: &mut logos::Lexer<Token>) -> Result<char, LexingError> {
+fn parse_char(lex: &mut logos::Lexer<Token>) -> std::result::Result<char, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
@@ -268,7 +294,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
+    pub fn tokenize(&mut self) -> LexResult<Vec<Token>> {
         let mut tokens = Vec::new();
         let mut lexer = Token::lexer(self.input);
         let mut errors = Vec::new();
@@ -284,14 +310,14 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        match errors.len() {
-            0 => Ok(tokens),
-            1 => Err(errors.remove(0).into()),
-            _ => Err(LexingErrorCollection { errors }.into()),
+        if errors.is_empty() {
+            Ok(tokens)
+        } else {
+            Err(LexingErrorCollection { errors })
         }
     }
 
-    pub fn tokenize_with_locations(&mut self) -> Result<Vec<Locatable<Token>>> {
+    pub fn tokenize_with_locations(&mut self) -> LexResult<Vec<Locatable<Token>>> {
         let mut tokens = Vec::new();
         let mut lexer = Token::lexer(self.input);
         let mut errors = Vec::new();
@@ -313,10 +339,10 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        match errors.len() {
-            0 => Ok(tokens),
-            1 => Err(errors.remove(0).into()),
-            _ => Err(LexingErrorCollection { errors }.into()),
+        if errors.is_empty() {
+            Ok(tokens)
+        } else {
+            Err(LexingErrorCollection { errors })
         }
     }
 }

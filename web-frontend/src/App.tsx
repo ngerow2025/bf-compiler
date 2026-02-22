@@ -120,7 +120,7 @@ const useCompiler = (initialSource: string) => {
             const ast = bf_compiler.parse(tokenCompilation.tokens, sourceCode);
             return { ast, parsingError: null };
         } catch (e: unknown) {
-            console.log(typeof e);
+            console.log(e);
             const errorMsg = e instanceof Error ? e.message : String(e);
             console.error("Parsing error:", e);
             return { ast: null, parsingError: errorMsg };
@@ -579,7 +579,7 @@ interface AstAnnotation {
 
 interface AstBody {
     annotation: AstAnnotation,
-    statements: AstStatement[], 
+    statements: AstStatement[],
 }
 
 interface AstParam {

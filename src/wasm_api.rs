@@ -11,7 +11,7 @@ use crate::ir2::{Ir2Function, generate_ir2};
 use crate::parser::{Function, FunctionId};
 use crate::source_annotation::SourceAnnotation;
 use crate::sources::{SourceCodeOrigin, SourceLocation};
-use crate::tokenizer::{Lexer, Locatable, Token};
+use crate::tokenizer::{Lexer, LexingErrorCollection, Locatable, Token};
 use crate::type_check::{TypedProgram, type_annotate_program};
 use crate::ucodegen::UCodeProgram;
 
@@ -397,7 +397,7 @@ fn bf_program_string(program: &[BfInstruction]) -> String {
 
 #[derive(Debug, Serialize)]
 struct TokenizationError {
-    error: Report,
+    error: LexingErrorCollection,
 }
 
 /// Tokenize source code and return a WasmTokens object
@@ -414,8 +414,15 @@ pub fn tokenize(source: &str) -> Result<WasmTokens, JsValue> {
     };
     let tokens = lexer
         .tokenize_with_locations()
-        .map_err(|e| JsValue::from_str(&format!("tokenize error: {}", e)))?;
-    Ok(WasmTokens { tokens })
+        .map_err(|e| serde_wasm_bindgen::to_value(&e));
+
+    if let Err(e) = tokens {
+        return Err(e?);
+    } else {
+        return Ok(WasmTokens {
+            tokens: tokens.unwrap(),
+        });
+    }
 }
 
 /// Parse tokens into an AST
@@ -429,12 +436,17 @@ pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
     let mut parser = crate::parser::Parser::new(tokens.tokens.clone(), &mut source_annotator);
     let ast = parser
         .parse_program()
-        .map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        .map_err(|e| serde_wasm_bindgen::to_value(&e));
 
-    Ok(WasmAst {
-        ast,
-        source: source_arc,
-    })
+    if let Err(e) = ast {
+        return Err(e?);
+    } else {
+        let ast = ast.unwrap();
+        return Ok(WasmAst {
+            ast,
+            source: source_arc,
+        });
+    }
 }
 
 /// Type check the AST
