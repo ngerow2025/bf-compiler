@@ -4,6 +4,8 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
+import { ASTTreeVisualization } from "./AST-svgs.tsx";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
 // ============================================================================
 // TYPES
@@ -17,23 +19,170 @@ interface TokenInfo {
 
 interface CompilationSteps {
     tokens: TokenInfo[];
-    ast_debug: string;
+    ast: AstProgramPayload;
 }
 
 interface HoverSpan {
-    start: number;
-    len: number;
+    offset: number;
+    length: number;
 }
+
+interface ParsingErrorInfo {
+    line: number;
+    column: number;
+    message: string;
+    length: number;
+}
+
+interface ParsingErrorSpan {
+    offset: number;
+    length: number;
+}
+
+type ParsingErrorKind = Record<string, unknown>;
+
+interface ParsingErrorPayload {
+    src_name: string;
+    src_code: string;
+    span: ParsingErrorSpan;
+    kind: ParsingErrorKind;
+}
+
+interface ParsingErrorCollection {
+    errors: ParsingErrorPayload[];
+}
+
+type ParsingErrors = ParsingErrorPayload | ParsingErrorCollection | ParsingErrorInfo[];
+
+interface CompilerState {
+    sourceCode: string;
+    tokens: ReturnType<typeof bf_compiler.tokenize> | null;
+    ast: ReturnType<typeof bf_compiler.parse> | null;
+    tokenizationError: string | null;
+    parsingErrors: ParsingErrors | null;
+    handleSourceChange: (newSource: string) => void;
+}
+
+const isParsingErrorPayload = (value: unknown): value is ParsingErrorPayload =>
+    typeof value === "object" &&
+    value !== null &&
+    "src_name" in value &&
+    "src_code" in value &&
+    "span" in value &&
+    "kind" in value;
+
+const isParsingErrorCollection = (
+    value: unknown,
+): value is ParsingErrorCollection =>
+    typeof value === "object" &&
+    value !== null &&
+    "errors" in value &&
+    Array.isArray((value as { errors?: unknown }).errors);
+
+const getLineColumnFromOffset = (
+    source: string,
+    offset: number,
+): { line: number; column: number } => {
+    const safeOffset = Math.max(0, Math.min(offset, source.length));
+    const upToOffset = source.slice(0, safeOffset);
+    const lines = upToOffset.split("\n");
+    return {
+        line: lines.length,
+        column: lines[lines.length - 1].length + 1,
+    };
+};
+
+const normalizeParsingError = (
+    error: ParsingErrorPayload,
+): ParsingErrorInfo => {
+    const { line, column } = getLineColumnFromOffset(
+        error.src_code,
+        error.span.offset,
+    );
+    return {
+        line,
+        column,
+        length: Math.max(1, error.span.length),
+        message: formatParsingErrorKind(error.kind),
+    };
+};
+
+const formatParsingErrorKind = (kind: ParsingErrorKind): string => {
+    if (typeof kind !== "object" || kind === null) {
+        return String(kind);
+    }
+
+    if ("ExpectedExpression" in kind) {
+        const payload = (kind as { ExpectedExpression?: { found?: unknown } })
+            .ExpectedExpression;
+        const found = payload?.found;
+        const foundText = formatFoundToken(found);
+        return `Expected expression, found ${foundText}`;
+    }
+
+    return JSON.stringify(kind);
+};
+
+const formatFoundToken = (found: unknown): string => {
+    if (typeof found === "string") return found;
+    if (typeof found !== "object" || found === null) return String(found);
+
+    const entries = Object.entries(found as Record<string, unknown>);
+    if (entries.length === 0) return "unknown token";
+
+    const [tokenName, tokenValue] = entries[0];
+    if (tokenName === "CharLiteral" && typeof tokenValue === "string") {
+        return `'${escapeControlChars(tokenValue)}'`;
+    }
+    if (typeof tokenValue === "string") {
+        return `${tokenName} '${escapeControlChars(tokenValue)}'`;
+    }
+    return tokenName;
+};
+
+const escapeControlChars = (value: string): string =>
+    value
+        .replace(/\\/g, "\\\\")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const DEFAULT_SOURCE_CODE = `fn main() {
-  let x: u8 = 65u8;
-  std::out(x);
-}`;
+const DEFAULT_SOURCE_CODE = `fn greet() {
+    let hello: str<10> = "Hello,    ";
+    let world: str<10> = "World!    ";
+    strOut(hello);
+    strOut(world);
 
+    let name: str<10> = "Alice     ";
+    strOut("Hello     ");
+    strOut(name);
+    strOut("!\n        ");
+}
+
+fn strOut(s: str<10>) {
+    std::out(s[0u8]);
+    std::out(s[1u8]);
+    std::out(s[2u8]);
+    std::out(s[3u8]);
+    std::out(s[4u8]);
+    std::out(s[5u8]);
+    std::out(s[6u8]);
+    std::out(s[7u8]);
+    std::out(s[8u8]);
+    std::out(s[9u8]);
+}
+
+fn main() {
+    let integer: u8 = 42u8;
+
+    std::out(integer);
+
+    greet();
+}`;
 
 const APP_VERSION = "v0.1.0";
 const APP_TITLE = "BF COMPILER EXPLORER";
@@ -90,7 +239,7 @@ const getTokenColor = (kind: string): string => {
     return TOKEN_COLOR_MAP[kind] ?? "text-slate-400";
 };
 
-const useCompiler = (initialSource: string) => {
+const useCompiler = (initialSource: string): CompilerState => {
     const [sourceCode, setSourceCode] = useState(initialSource);
 
     // Initialize WASM once
@@ -113,15 +262,14 @@ const useCompiler = (initialSource: string) => {
     // Stage 2: AST Parsing - only runs when tokens change
     const astCompilation = useMemo(() => {
         if (!tokenCompilation.tokens) {
-            return { ast: null, parsingError: null };
+            return { ast: null, parsingErrors: null };
         }
         try {
             const ast = bf_compiler.parse(tokenCompilation.tokens, sourceCode);
-            return { ast, parsingError: null };
+            return { ast, parsingErrors: null };
         } catch (e: unknown) {
-            const errorMsg = e instanceof Error ? e.message : String(e);
             console.error("Parsing error:", e);
-            return { ast: null, parsingError: errorMsg };
+            return { ast: null, parsingErrors: e as ParsingErrors };
         }
     }, [tokenCompilation.tokens, sourceCode]);
 
@@ -134,7 +282,7 @@ const useCompiler = (initialSource: string) => {
         tokens: tokenCompilation.tokens,
         ast: astCompilation.ast,
         tokenizationError: tokenCompilation.tokenizationError,
-        parsingError: astCompilation.parsingError,
+        parsingErrors: astCompilation.parsingErrors,
         handleSourceChange,
     };
 };
@@ -150,13 +298,25 @@ interface TokenBadgeProps {
     type: string;
     value?: string;
     color: string;
+    isHighlighted?: boolean;
     onHover?: () => void;
     onLeave?: () => void;
 }
 
-const TokenBadge = ({ type, value, color, onHover, onLeave }: TokenBadgeProps) => (
+const TokenBadge = ({
+    type,
+    value,
+    color,
+    isHighlighted,
+    onHover,
+    onLeave,
+}: TokenBadgeProps) => (
     <div
-        className="inline-flex items-center gap-1.5 bg-white/5 px-1.5 py-0.5 rounded text-[11px] font-mono border border-transparent hover:border-blue-500/50 cursor-default transition-colors"
+        className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] font-mono border cursor-default transition-colors ${
+            isHighlighted
+                ? "bg-blue-500/25 border-blue-400/80"
+                : "bg-white/5 border-transparent hover:border-blue-500/50"
+        }`}
         onMouseEnter={onHover}
         onMouseLeave={onLeave}
     >
@@ -174,38 +334,45 @@ interface SourceEditorProps {
     onEditorMount: OnMount;
 }
 
-const SourceEditor = ({ sourceCode, onChange, onEditorMount }: SourceEditorProps) => (
-    <Panel defaultSize={33} minSize={20}>
-        <div className="h-full flex flex-col bg-[#1e1e1e]">
-            <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
-                <Code2 size={14} /> Source Code
+const SourceEditor = ({
+    sourceCode,
+    onChange,
+    onEditorMount,
+}: SourceEditorProps) => {
+    return (
+        <Panel defaultSize={33} minSize={20}>
+            <div className="h-full flex flex-col bg-[#1e1e1e]">
+                <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
+                    <Code2 size={14} /> Source Code
+                </div>
+                <div className="flex-1 overflow-hidden">
+                    <Editor
+                        height="100%"
+                        defaultLanguage="rust"
+                        theme="vs-dark"
+                        value={sourceCode}
+                        onChange={(value) => onChange(value ?? "")}
+                        onMount={onEditorMount}
+                        options={{
+                            minimap: { enabled: false },
+                            fontSize: 14,
+                            lineHeight: 27,
+                            lineNumbers: "on",
+                            scrollBeyondLastLine: false,
+                            automaticLayout: true,
+                            tabSize: 2,
+                            wordWrap: "off",
+                            fontFamily:
+                                "'Fira Code', 'Cascadia Code', Consolas, monospace",
+                            fontLigatures: true,
+                            padding: { top: 16 },
+                        }}
+                    />
+                </div>
             </div>
-            <div className="flex-1 overflow-hidden">
-                <Editor
-                    height="100%"
-                    defaultLanguage="rust"
-                    theme="vs-dark"
-                    value={sourceCode}
-                    onChange={(value) => onChange(value ?? "")}
-                    onMount={onEditorMount}
-                    options={{
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        lineHeight: 27,
-                        lineNumbers: "on",
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        tabSize: 2,
-                        wordWrap: "off",
-                        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, monospace",
-                        fontLigatures: true,
-                        padding: { top: 16 },
-                    }}
-                />
-            </div>
-        </div>
-    </Panel>
-);
+        </Panel>
+    );
+};
 
 /**
  * Token Stream Panel - displays tokenized code
@@ -213,6 +380,7 @@ const SourceEditor = ({ sourceCode, onChange, onEditorMount }: SourceEditorProps
 interface TokenStreamProps {
     tokens: TokenInfo[] | null;
     tokensByLine: TokenInfo[][] | null;
+    hoverSpan: HoverSpan | null;
     onTokenHover: (span: HoverSpan | null) => void;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     lineHeight: number;
@@ -220,13 +388,25 @@ interface TokenStreamProps {
     error: string | null;
 }
 
-const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight, isCompiling, error }: TokenStreamProps) => (
+const TokenStream = ({
+    tokens,
+    tokensByLine,
+    hoverSpan,
+    onTokenHover,
+    scrollRef,
+    lineHeight,
+    isCompiling,
+    error,
+}: TokenStreamProps) => (
     <Panel defaultSize={33} minSize={20}>
         <div className="h-full flex flex-col bg-[#252526] border-x border-white/5">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
                 <Cpu size={14} /> Tokens ({tokens?.length ?? 0})
             </div>
-            <div ref={scrollRef} className="flex-1 overflow-auto font-mono text-sm">
+            <div
+                ref={scrollRef}
+                className="flex-1 overflow-auto font-mono text-sm"
+            >
                 {error && (
                     <div className="p-4 text-red-400 text-xs">
                         <div className="font-bold mb-1">Tokenization Error</div>
@@ -236,7 +416,10 @@ const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight
                 {isCompiling && !tokens && (
                     <div className="p-4 space-y-2">
                         {[...Array(5)].map((_, i) => (
-                            <div key={i} className="h-6 bg-white/5 rounded animate-pulse" />
+                            <div
+                                key={i}
+                                className="h-6 bg-white/5 rounded animate-pulse"
+                            />
                         ))}
                     </div>
                 )}
@@ -258,10 +441,16 @@ const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight
                                             type={token.kind}
                                             value={token.value}
                                             color={getTokenColor(token.kind)}
+                                            isHighlighted={
+                                                !!hoverSpan &&
+                                                token.span_start >= hoverSpan.offset &&
+                                                token.span_start + token.span_len <=
+                                                    hoverSpan.offset + hoverSpan.length
+                                            }
                                             onHover={() =>
                                                 onTokenHover({
-                                                    start: token.span_start,
-                                                    len: token.span_len,
+                                                    offset: token.span_start,
+                                                    length: token.span_len,
                                                 })
                                             }
                                             onLeave={() => onTokenHover(null)}
@@ -283,37 +472,72 @@ const TokenStream = ({ tokens, tokensByLine, onTokenHover, scrollRef, lineHeight
 interface CompilationOutputProps {
     compilationSteps: CompilationSteps | null;
     isCompiling: boolean;
-    error: string | null;
+    errors: any;
+    onNodeHover: (span: HoverSpan | null) => void;
 }
 
-const CompilationOutput = ({ compilationSteps, isCompiling, error }: CompilationOutputProps) => (
+const CompilationOutput = ({
+    compilationSteps,
+    isCompiling,
+    errors,
+    onNodeHover,
+}: CompilationOutputProps) => (
     <Panel defaultSize={34} minSize={20}>
         <div className="h-full flex flex-col bg-[#1e1e1e]">
             <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
                 <Network size={14} /> Compilation Output
             </div>
-            <div className="flex-1 p-4 overflow-auto font-mono text-xs">
-                {error && (
-                    <div className="text-red-400 text-xs">
-                        <div className="font-bold mb-1">Parsing Error</div>
-                        <div className="whitespace-pre-wrap">{error}</div>
+            <div className="flex-1 overflow-auto font-mono text-xs">
+                {errors && (
+                    <div className="text-red-400 text-xs h-full w-full p-4">
+                        <div className="font-bold text-lg mb-1">There are {errors.errors.length} Parsing Errors</div>
                     </div>
                 )}
                 {isCompiling && !compilationSteps && (
-                    <div className="space-y-2">
+                    <div className="space-y-2 h-full w-full p-4">
                         {[...Array(6)].map((_, i) => (
-                            <div key={i} className="h-4 bg-white/5 rounded animate-pulse" />
+                            <div
+                                key={i}
+                                className="h-4 bg-white/5 rounded animate-pulse"
+                            />
                         ))}
                     </div>
                 )}
                 {compilationSteps && (
-                    <div className="space-y-4">
-                        <div>
-                            <div className="text-green-400 font-bold mb-1">AST</div>
-                            <pre className="text-slate-300 whitespace-pre-wrap text-[10px]">
-                                {compilationSteps.ast_debug}
-                            </pre>
-                        </div>
+                    <div className="h-full w-full">
+                        <TransformWrapper
+                            limitToBounds={false}
+                            wheel={{
+                                step: 20,
+                                smoothStep: 0.001,
+                                disabled: false,
+                                activationKeys: [],
+                                excluded: [],
+                            }}
+                            pinch={{
+                                step: 1000,
+                                disabled: false,
+                                excluded: [],
+                            }}
+                            panning={{
+                                excluded: [],
+                                disabled: false,
+                                activationKeys: [],
+                            }}
+                            doubleClick={{ excluded: [], step: 0.7 }}
+                            maxScale={5000}
+                            minScale={0.1}
+                        >
+                            <TransformComponent
+                                wrapperStyle={{ width: "100%", height: "100%" }}
+                            >
+                                <ASTTreeVisualization
+                                    payload={compilationSteps.ast}
+                                    onNodeHover={onNodeHover}
+                                    key={JSON.stringify(compilationSteps.ast)}
+                                />
+                            </TransformComponent>
+                        </TransformWrapper>
                     </div>
                 )}
             </div>
@@ -329,15 +553,30 @@ const CompilationOutput = ({ compilationSteps, isCompiling, error }: Compilation
  * Main Compiler Explorer Application
  */
 const CompilerExplorer = () => {
-    const { sourceCode, tokens, ast, tokenizationError, parsingError, handleSourceChange } =
-        useCompiler(DEFAULT_SOURCE_CODE);
+    const {
+        sourceCode,
+        tokens,
+        ast,
+        tokenizationError,
+        parsingErrors,
+        handleSourceChange,
+    } = useCompiler(DEFAULT_SOURCE_CODE);
     const [hoverSpan, setHoverSpan] = useState<HoverSpan | null>(null);
     const [lineHeight, setLineHeight] = useState<number>(27);
 
+    const [editor, setEditor] =
+        useState<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+    const [model, setModel] = useState<monacoEditor.editor.ITextModel | null>(
+        null,
+    );
+    const monacoRef = useRef<typeof monacoEditor | null>(null);
     // Refs for Monaco editor and scroll synchronization
-    const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+    const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(
+        null,
+    );
     const tokenStreamRef = useRef<HTMLDivElement | null>(null);
-    const decorationsRef = useRef<monacoEditor.editor.IEditorDecorationsCollection | null>(null);
+    const decorationsRef =
+        useRef<monacoEditor.editor.IEditorDecorationsCollection | null>(null);
 
     // Determine if we're in a compiling state (no tokens yet means still compiling)
     const isCompiling = tokens === null && tokenizationError === null;
@@ -345,18 +584,65 @@ const CompilerExplorer = () => {
     // Handle Monaco editor mount
     const handleEditorMount: OnMount = useCallback((editor, monaco) => {
         editorRef.current = editor;
-        
+        monacoRef.current = monaco;
+
         // Get line height from editor options
-        const editorLineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight);
+        const editorLineHeight = editor.getOption(
+            monaco.editor.EditorOption.lineHeight,
+        );
         setLineHeight(editorLineHeight);
-        
+
         // Set up scroll synchronization
         editor.onDidScrollChange((e) => {
             if (tokenStreamRef.current) {
                 tokenStreamRef.current.scrollTop = e.scrollTop;
             }
         });
+
+        const model = editor.getModel();
+        setModel(model);
+        setEditor(editor);
     }, []);
+
+    const parsingErrorList = useMemo<ParsingErrorInfo[]>(() => {
+        if (!parsingErrors) return [];
+        if (Array.isArray(parsingErrors)) return parsingErrors;
+        if (isParsingErrorCollection(parsingErrors)) {
+            return parsingErrors.errors.map(normalizeParsingError);
+        }
+        if (isParsingErrorPayload(parsingErrors)) {
+            return [normalizeParsingError(parsingErrors)];
+        }
+        return [];
+    }, [parsingErrors]);
+
+    useEffect(() => {
+        if (!model || !editor || !monacoRef.current) return;
+        const monaco = monacoRef.current;
+        const markers = parsingErrorList.map((error) => {
+            const startPos = model.getPositionAt(
+                model.getOffsetAt({
+                    lineNumber: error.line,
+                    column: error.column,
+                }),
+            );
+            const endPos = model.getPositionAt(
+                model.getOffsetAt({
+                    lineNumber: error.line,
+                    column: error.column,
+                }) + error.length,
+            );
+            return {
+                startLineNumber: startPos.lineNumber,
+                endLineNumber: endPos.lineNumber,
+                startColumn: startPos.column,
+                endColumn: endPos.column,
+                message: error.message,
+                severity: monaco.MarkerSeverity.Error,
+            };
+        });
+        monaco.editor.setModelMarkers(model, "bf-compiler", markers);
+    }, [model, editor, parsingErrorList]);
 
     // Sync token stream scroll when tokens change
     useEffect(() => {
@@ -369,7 +655,7 @@ const CompilerExplorer = () => {
     // Update decorations when hoverSpan changes
     useEffect(() => {
         if (!editorRef.current) return;
-        
+
         if (decorationsRef.current) {
             decorationsRef.current.clear();
         }
@@ -377,23 +663,26 @@ const CompilerExplorer = () => {
         if (hoverSpan) {
             const model = editorRef.current.getModel();
             if (model) {
-                const startPos = model.getPositionAt(hoverSpan.start);
-                const endPos = model.getPositionAt(hoverSpan.start + hoverSpan.len);
-                
-                decorationsRef.current = editorRef.current.createDecorationsCollection([
-                    {
-                        range: {
-                            startLineNumber: startPos.lineNumber,
-                            startColumn: startPos.column,
-                            endLineNumber: endPos.lineNumber,
-                            endColumn: endPos.column,
+                const startPos = model.getPositionAt(hoverSpan.offset);
+                const endPos = model.getPositionAt(
+                    hoverSpan.offset + hoverSpan.length,
+                );
+
+                decorationsRef.current =
+                    editorRef.current.createDecorationsCollection([
+                        {
+                            range: {
+                                startLineNumber: startPos.lineNumber,
+                                startColumn: startPos.column,
+                                endLineNumber: endPos.lineNumber,
+                                endColumn: endPos.column,
+                            },
+                            options: {
+                                className: "monaco-highlight-span",
+                                inlineClassName: "monaco-highlight-span-inline",
+                            },
                         },
-                        options: {
-                            className: "monaco-highlight-span",
-                            inlineClassName: "monaco-highlight-span-inline",
-                        },
-                    },
-                ]);
+                    ]);
             }
         }
     }, [hoverSpan]);
@@ -424,7 +713,10 @@ const CompilerExplorer = () => {
             const lineEnd = currentPos + line.length;
 
             tokensArray.forEach((token) => {
-                if (token.span_start >= lineStart && token.span_start < lineEnd) {
+                if (
+                    token.span_start >= lineStart &&
+                    token.span_start < lineEnd
+                ) {
                     lines[lineIndex].push(token);
                 }
             });
@@ -440,9 +732,11 @@ const CompilerExplorer = () => {
         if (!ast || !tokensArray) return null;
         return {
             tokens: tokensArray,
-            ast_debug: ast.debug_string(),
+            ast: ast.get_all_functions(),
         };
-    }, [ast, tokensArray]);
+    }, [ast, tokensArray]) as
+        | { tokens: TokenInfo[]; ast: AstProgramPayload }
+        | null;
 
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
@@ -451,7 +745,9 @@ const CompilerExplorer = () => {
                 <h1 className="font-bold text-sm tracking-tight flex items-center gap-2">
                     <Cpu size={18} className="text-blue-400" />
                     {APP_TITLE}{" "}
-                    <span className="text-white/30 font-light">{APP_VERSION}</span>
+                    <span className="text-white/30 font-light">
+                        {APP_VERSION}
+                    </span>
                 </h1>
             </header>
 
@@ -466,6 +762,7 @@ const CompilerExplorer = () => {
                     <TokenStream
                         tokens={tokensArray}
                         tokensByLine={tokensByLine}
+                        hoverSpan={hoverSpan}
                         onTokenHover={setHoverSpan}
                         scrollRef={tokenStreamRef}
                         lineHeight={lineHeight}
@@ -474,13 +771,132 @@ const CompilerExplorer = () => {
                     />
                     <CompilationOutput
                         compilationSteps={compilationSteps}
-                        isCompiling={ast === null && parsingError === null}
-                        error={parsingError}
+                        isCompiling={ast === null && parsingErrors === null}
+                        errors={parsingErrors}
+                        onNodeHover={setHoverSpan}
                     />
                 </Group>
             </main>
         </div>
     );
 };
+
+// Full AST Program structure from WASM
+export interface Span {
+    offset: number;
+    length: number;
+}
+
+export interface SimpleAnnotation {
+    span: Span;
+}
+
+export interface IntLiteralValue {
+    U8?: number;
+    I8?: number;
+    U16?: number;
+    I16?: number;
+    U32?: number;
+    I32?: number;
+    U64?: number;
+    I64?: number;
+}
+
+export interface AstIntLiteral {
+    value: IntLiteralValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstVariableAccessValue {
+    id: number;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstVariableAccessExpr {
+    value: AstVariableAccessValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstStringLiteralExpr {
+    value: string;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstArrayAccessExpr {
+    array: AstVariableAccessValue;
+    index_expr: AstExpressionValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFnCallExpr {
+    qualified_name: QualifiedName;
+    arguments: AstExpressionValue[];
+    annotation: SimpleAnnotation;
+}
+
+export type AstExpressionValue =
+    | { IntLiteral: AstIntLiteral }
+    | { StringLiteral: AstStringLiteralExpr }
+    | { VariableAccess: AstVariableAccessExpr }
+    | { ArrayAccess: AstArrayAccessExpr }
+    | { FnCall: AstFnCallExpr };
+
+export interface AstVarDeclStmt {
+    name: string;
+    type_: { kind: string; annotation: SimpleAnnotation };
+    value: AstExpressionValue;
+    variable_index: number;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstExpressionStmt {
+    expr: AstExpressionValue;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstAssignmentStmt {
+    var: number;
+    value: AstExpressionValue;
+    annotation: SimpleAnnotation;
+}
+
+export type AstBlockItem =
+    | {
+          Statement: {
+              VarDecl?: AstVarDeclStmt;
+              Expression?: AstExpressionStmt;
+              Assignment?: AstAssignmentStmt;
+          };
+      }
+    | {
+          Block: AstBlockBody;
+      };
+
+export interface AstBlockBody {
+    statements: AstBlockItem[];
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFunctionParam {
+    type_: { kind: string; annotation: SimpleAnnotation };
+    variable_index: number;
+    annotation: SimpleAnnotation;
+}
+
+export interface AstFunctionPayload {
+    name: QualifiedName;
+    params: AstFunctionParam[];
+    body: AstBlockBody;
+    id: number;
+    variable_name_mapping: Record<string, number>;
+    annotation: SimpleAnnotation;
+}
+
+export interface QualifiedName {
+    parts: string[];
+    annotation: SimpleAnnotation;
+}
+
+export type AstProgramPayload = AstFunctionPayload[];
 
 export default CompilerExplorer;
