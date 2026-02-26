@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev.backend
+    volumes:
+      - ./src:/app/src
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev.frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web-frontend:/app/web-frontend
+    depends_on:
+      - backend
+    environment:
+      - CI=true
+
+volumes:
+  wasm_output:

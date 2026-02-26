@@ -1,0 +1,18 @@
+# Backend Dockerfile for WASM compilation and watching
+FROM rust:1.93-bookworm
+
+# Install wasm-pack and cargo-watch
+RUN cargo install cargo-watch wasm-pack
+
+# Add wasm target
+RUN rustup target add wasm32-unknown-unknown
+
+WORKDIR /app
+
+# Copy Rust project files
+COPY Cargo.toml Cargo.lock* ./
+
+# Pre-build wasm once to avoid immediate re-trigger
+RUN wasm-pack build --dev --target bundler --out-dir web-frontend/src/wasm --out-name compiler_bf_target
+    
+

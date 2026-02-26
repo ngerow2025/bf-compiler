@@ -1,0 +1,15 @@
+# Frontend Dockerfile for development
+FROM node:20-slim
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+RUN corepack enable
+
+WORKDIR /app/web-frontend
+
+RUN pnpm install
+
+EXPOSE 5173
+
+CMD ["pnpm", "dev", "--host", "0.0.0.0"]
