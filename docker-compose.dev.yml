@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   backend:
@@ -7,6 +6,7 @@ services:
       dockerfile: Dockerfile.dev.backend
     volumes:
       - ./src:/app/src
+      - ./web-frontend:/app/web-frontend
 
   frontend:
     build:
@@ -20,6 +20,3 @@ services:
       - backend
     environment:
       - CI=true
-
-volumes:
-  wasm_output:

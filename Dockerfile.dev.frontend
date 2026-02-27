@@ -4,9 +4,12 @@ FROM node:20-slim
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-RUN corepack enable
 
 WORKDIR /app/web-frontend
+
+RUN corepack enable
+
+COPY web-frontend/package.json web-frontend/pnpm-lock.yaml* ./
 
 RUN pnpm install
 
