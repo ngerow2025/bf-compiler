@@ -1,9 +1,12 @@
 use core::panic;
 use std::collections::HashMap;
 
-use crate::parser::{
-    ASTAnnotation, ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral,
-    Program, Statement, VariableAccess, VariableId,
+use crate::{
+    ast_annotation::ASTAnnotation,
+    parser::{
+        ASTTypeKind, Block, BlockItem, Expression, Function, FunctionId, IntLiteral, Program,
+        Statement, VariableId,
+    },
 };
 
 #[derive(Debug)]

@@ -1,12 +1,18 @@
 use serde::Serialize;
 
 use crate::{
-    parser::{
-        ASTAnnotation, ASTTypeKind, ASTTypeNode, Block, BlockItem, Expression, Function,
-        FunctionId, FunctionParam, IntLiteral, QualifiedName, VariableAccess, VariableId,
+    ast_annotation::{
+        ASTAnnotation, ConstructArrayAccessAnnotationParams, ConstructAssignmentAnnotationParams,
+        ConstructBlockAnnotationParams, ConstructExpressionStatementAnnotationParams,
+        ConstructFnCallAnnotationParams, ConstructFunctionAnnotationParams,
+        ConstructFunctionParamAnnotationParams, ConstructIntLiteralAnnotationParams,
+        ConstructProgramAnnotationParams, ConstructQualifiedIdentifierAnnotationParams,
+        ConstructSimpleTypeNodeAnnotationParams, ConstructStrTypeNodeAnnotationParams,
+        ConstructStringLiteralAnnotationParams, ConstructVarDeclAnnotationParams,
+        ConstructVariableAccessAnnotationParams, ConstructVariableAccessExpressionAnnotationParams,
     },
+    parser::{BlockItem, Expression},
     sources::{SourceCodeOrigin, SourceLocation},
-    tokenizer::{Locatable, Token},
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -26,25 +32,20 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_program_annotation(
         &mut self,
-        functions: &[Function<Self>],
-        function_name_mapping: &std::collections::HashMap<FunctionId, String>,
+        _params: ConstructProgramAnnotationParams<'_, Self>,
     ) -> Self::ProgramAnnotation {
-        ()
     }
 
     type FunctionParamAnnotation = SourceLocation;
 
     fn construct_function_param_annotation(
         &mut self,
-        identifier_token: &Locatable<Token>,
-        colon_token: &Locatable<Token>,
-        type_node: &ASTTypeNode<Self>,
-        variable_index: &VariableId,
+        params: ConstructFunctionParamAnnotationParams<'_, Self>,
     ) -> Self::FunctionParamAnnotation {
         SourceLocation::superset([
-            &identifier_token.loc,
-            &colon_token.loc,
-            &type_node.annotation,
+            &params.identifier_token.loc,
+            &params.colon_token.loc,
+            &params.type_node.annotation,
         ])
     }
 
@@ -52,21 +53,14 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_function_annotation(
         &mut self,
-        fn_token: &Locatable<Token>,
-        name_token: &Locatable<Token>,
-        left_paren_token: &Locatable<Token>,
-        params: &[FunctionParam<Self>],
-        comma_tokens: &[Locatable<Token>],
-        right_paren_token: &Locatable<Token>,
-        body: &Block<Self>,
-        function_id: &FunctionId,
+        params: ConstructFunctionAnnotationParams<'_, Self>,
     ) -> Self::FunctionAnnotation {
         SourceLocation::superset([
-            &fn_token.loc,
-            &name_token.loc,
-            &left_paren_token.loc,
-            &right_paren_token.loc,
-            &body.annotation,
+            &params.fn_token.loc,
+            &params.name_token.loc,
+            &params.left_paren_token.loc,
+            &params.right_paren_token.loc,
+            &params.body.annotation,
         ])
     }
 
@@ -74,12 +68,11 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_block_annotation(
         &mut self,
-        left_brace_token: &Locatable<Token>,
-        statements: &[BlockItem<Self>],
-        right_brace_token: &Locatable<Token>,
+        params: ConstructBlockAnnotationParams<'_, Self>,
     ) -> Self::BlockAnnotation {
         SourceLocation::superset(
-            statements
+            params
+                .statements
                 .iter()
                 .map(|stmt| match stmt {
                     BlockItem::Statement(statement) => match statement {
@@ -89,7 +82,7 @@ impl ASTAnnotation for SourceAnnotation {
                     },
                     BlockItem::Block(block) => &block.annotation,
                 })
-                .chain([&left_brace_token.loc, &right_brace_token.loc]),
+                .chain([&params.left_brace_token.loc, &params.right_brace_token.loc]),
         )
     }
 
@@ -97,46 +90,35 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_expression_statement_annotation(
         &mut self,
-        expr: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
+        params: ConstructExpressionStatementAnnotationParams<'_, Self>,
     ) -> Self::StatementAnnotation {
-        SourceLocation::superset([expr.annotation(), &semicolon_token.loc])
+        SourceLocation::superset([params.expr.annotation(), &params.semicolon_token.loc])
     }
 
     fn construct_assignment_annotation(
         &mut self,
-        identifier_token: &Locatable<Token>,
-        equals_token: &Locatable<Token>,
-        value: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
+        params: ConstructAssignmentAnnotationParams<'_, Self>,
     ) -> Self::StatementAnnotation {
         SourceLocation::superset([
-            &identifier_token.loc,
-            &equals_token.loc,
-            &value.annotation(),
-            &semicolon_token.loc,
+            &params.identifier_token.loc,
+            &params.equals_token.loc,
+            params.value.annotation(),
+            &params.semicolon_token.loc,
         ])
     }
 
     fn construct_var_decl_annotation(
         &mut self,
-        let_token: &Locatable<Token>,
-        identifier_token: &Locatable<Token>,
-        colon_token: &Locatable<Token>,
-        type_node: &ASTTypeNode<Self>,
-        equals_token: &Locatable<Token>,
-        value: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
-        variable_index: &VariableId,
+        params: ConstructVarDeclAnnotationParams<'_, Self>,
     ) -> Self::StatementAnnotation {
         SourceLocation::superset([
-            &let_token.loc,
-            &identifier_token.loc,
-            &colon_token.loc,
-            &type_node.annotation,
-            &equals_token.loc,
-            &value.annotation(),
-            &semicolon_token.loc,
+            &params.let_token.loc,
+            &params.identifier_token.loc,
+            &params.colon_token.loc,
+            &params.type_node.annotation,
+            &params.equals_token.loc,
+            params.value.annotation(),
+            &params.semicolon_token.loc,
         ])
     }
 
@@ -144,57 +126,46 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_string_literal_annotation(
         &mut self,
-        string_token: &Locatable<Token>,
-        value: &str,
+        params: ConstructStringLiteralAnnotationParams<'_>,
     ) -> Self::ExpressionAnnotation {
-        string_token.loc.clone()
+        params.string_token.loc.clone()
     }
 
     fn construct_int_literal_annotation(
         &mut self,
-        int_token: &Locatable<Token>,
-        int_value: &str,
-        type_node: &ASTTypeNode<Self>,
-        parsed_value: &IntLiteral,
+        params: ConstructIntLiteralAnnotationParams<'_, Self>,
     ) -> Self::ExpressionAnnotation {
-        SourceLocation::superset([&int_token.loc, &type_node.annotation])
+        SourceLocation::superset([&params.int_token.loc, &params.type_node.annotation])
     }
 
     fn construct_array_access_annotation(
         &mut self,
-        array: &VariableAccess<Self>,
-        left_bracket_token: &Locatable<Token>,
-        index_expr: &Expression<Self>,
-        right_bracket_token: &Locatable<Token>,
+        params: ConstructArrayAccessAnnotationParams<'_, Self>,
     ) -> Self::ExpressionAnnotation {
         SourceLocation::superset([
-            &array.annotation,
-            &left_bracket_token.loc,
-            &index_expr.annotation(),
-            &right_bracket_token.loc,
+            &params.array.annotation,
+            &params.left_bracket_token.loc,
+            params.index_expr.annotation(),
+            &params.right_bracket_token.loc,
         ])
     }
 
     fn construct_fn_call_annotation(
         &mut self,
-        qualified_name: &QualifiedName<Self>,
-        left_paren_token: &Locatable<Token>,
-        arguments: &[Expression<Self>],
-        comma_tokens: &[Locatable<Token>],
-        right_paren_token: &Locatable<Token>,
+        params: ConstructFnCallAnnotationParams<'_, Self>,
     ) -> Self::ExpressionAnnotation {
         SourceLocation::superset(
-            std::iter::once(&qualified_name.annotation)
-                .chain(std::iter::once(&left_paren_token.loc))
-                .chain(arguments.iter().map(|arg| match arg {
+            std::iter::once(&params.qualified_name.annotation)
+                .chain(std::iter::once(&params.left_paren_token.loc))
+                .chain(params.arguments.iter().map(|arg| match arg {
                     Expression::IntLiteral { annotation, .. } => annotation,
                     Expression::VariableAccess { annotation, .. } => annotation,
                     Expression::FnCall { annotation, .. } => annotation,
                     Expression::StringLiteral { annotation, .. } => annotation,
                     Expression::ArrayAccess { annotation, .. } => annotation,
                 }))
-                .chain(comma_tokens.iter().map(|comma| &comma.loc))
-                .chain(std::iter::once(&right_paren_token.loc)),
+                .chain(params.comma_tokens.iter().map(|comma| &comma.loc))
+                .chain(std::iter::once(&params.right_paren_token.loc)),
         )
     }
 
@@ -202,27 +173,23 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_variable_access_annotation(
         &mut self,
-        name_token: &Locatable<Token>,
-        name: &str,
-        variable_id: &VariableId,
+        params: ConstructVariableAccessAnnotationParams<'_>,
     ) -> Self::VariableAccessAnnotation {
-        name_token.loc.clone()
+        params.name_token.loc.clone()
     }
 
     type QualifiedIdentifierAnnotation = SourceLocation;
 
     fn construct_qualified_identifier_annotation(
         &mut self,
-        identifier_tokens: &[Locatable<Token>],
-        double_colon_tokens: &[Locatable<Token>],
-        parts: &[String],
-        name: &str,
+        params: ConstructQualifiedIdentifierAnnotationParams<'_>,
     ) -> Self::QualifiedIdentifierAnnotation {
         SourceLocation::superset(
-            identifier_tokens
+            params
+                .identifier_tokens
                 .iter()
                 .map(|t| &t.loc)
-                .chain(double_colon_tokens.iter().map(|t| &t.loc)),
+                .chain(params.double_colon_tokens.iter().map(|t| &t.loc)),
         )
     }
 
@@ -230,32 +197,27 @@ impl ASTAnnotation for SourceAnnotation {
 
     fn construct_simple_type_node_annotation(
         &mut self,
-        type_token: &Locatable<Token>,
-        kind: &ASTTypeKind,
+        params: ConstructSimpleTypeNodeAnnotationParams<'_>,
     ) -> Self::ASTTypeNodeAnnotation {
-        type_token.loc.clone()
+        params.type_token.loc.clone()
     }
 
     fn construct_str_type_node_annotation(
         &mut self,
-        type_token: &Locatable<Token>,
-        kind: &ASTTypeKind,
-        left_angle_token: &Locatable<Token>,
-        size_token: &Locatable<Token>,
-        right_angle_token: &Locatable<Token>,
+        params: ConstructStrTypeNodeAnnotationParams<'_>,
     ) -> Self::ASTTypeNodeAnnotation {
         SourceLocation::superset([
-            &type_token.loc,
-            &left_angle_token.loc,
-            &size_token.loc,
-            &right_angle_token.loc,
+            &params.type_token.loc,
+            &params.left_angle_token.loc,
+            &params.size_token.loc,
+            &params.right_angle_token.loc,
         ])
     }
 
     fn construct_variable_access_expression_annotation(
         &mut self,
-        variable_access: &VariableAccess<Self>,
+        params: ConstructVariableAccessExpressionAnnotationParams<'_, Self>,
     ) -> Self::ExpressionAnnotation {
-        variable_access.annotation.clone()
+        params.variable_access.annotation.clone()
     }
 }

@@ -81,6 +81,12 @@ impl Display for BfUcodeInstruction {
     }
 }
 
+impl Default for BfGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BfGenerator {
     pub fn new() -> BfGenerator {
         BfGenerator { code: vec![] }
@@ -102,7 +108,7 @@ impl BfGenerator {
             Ir2Instruction::Init { target, value } => {
                 vec![
                     BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
-                    BfUcodeInstruction::Inc(*value as u8),
+                    BfUcodeInstruction::Inc(*value),
                 ]
             }
             Ir2Instruction::Move { target, source } => {
@@ -117,7 +123,7 @@ impl BfGenerator {
                     BfUcodeInstruction::Loop(
                         vec![BfUcodeInstruction::Dec(1)]
                             .into_iter()
-                            .chain(targets.into_iter().flat_map(|target| {
+                            .chain(targets.iter().flat_map(|target| {
                                 vec![
                                     BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
                                     BfUcodeInstruction::Inc(1),
@@ -135,7 +141,7 @@ impl BfGenerator {
                 let distance = target.0 as i64 - source.0 as i64;
                 vec![BfUcodeInstruction::MovePtr(Location::Absolute(source.0))]
                     .into_iter()
-                    .chain((0..*size).into_iter().flat_map(|_| {
+                    .chain((0..*size).flat_map(|_| {
                         vec![
                             BfUcodeInstruction::MoveData {
                                 from: Location::Relative(0),
@@ -161,7 +167,7 @@ impl BfGenerator {
 
                 vec![BfUcodeInstruction::MovePtr(Location::Absolute(source.0))]
                     .into_iter()
-                    .chain((0..*size).into_iter().flat_map(|_| {
+                    .chain((0..*size).flat_map(|_| {
                         vec![
                             BfUcodeInstruction::Loop(
                                 vec![BfUcodeInstruction::Dec(1)]

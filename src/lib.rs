@@ -1,3 +1,5 @@
+#![recursion_limit = "10000"]
+pub mod ast_annotation;
 pub mod codegen;
 pub mod ir;
 pub mod ir2;

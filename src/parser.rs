@@ -2,137 +2,18 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::num::IntErrorKind;
 
-use clap::error;
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use serde::Serialize;
 use serde::ser::SerializeStruct;
 use thiserror::Error;
 
+use crate::ast_annotation::{self, ASTAnnotation};
 use crate::sources::SourceCodeOrigin;
 use crate::tokenizer::{Locatable, Token};
 
 // --- AST Definitions ---
 
-pub trait ASTAnnotation: Sized + Clone + Debug {
-    type ProgramAnnotation: Debug + Clone + Serialize;
-    fn construct_program_annotation(
-        &mut self,
-        functions: &[Function<Self>],
-        function_name_mapping: &HashMap<FunctionId, String>,
-    ) -> Self::ProgramAnnotation;
-    type FunctionParamAnnotation: Debug + Clone + Serialize;
-    fn construct_function_param_annotation(
-        &mut self,
-        identifier_token: &Locatable<Token>,
-        colon_token: &Locatable<Token>,
-        type_node: &ASTTypeNode<Self>,
-        variable_index: &VariableId,
-    ) -> Self::FunctionParamAnnotation;
-    type FunctionAnnotation: Debug + Clone + Serialize;
-    fn construct_function_annotation(
-        &mut self,
-        fn_token: &Locatable<Token>,
-        name_token: &Locatable<Token>,
-        left_paren_token: &Locatable<Token>,
-        params: &[FunctionParam<Self>],
-        comma_tokens: &[Locatable<Token>],
-        right_paren_token: &Locatable<Token>,
-        body: &Block<Self>,
-        function_id: &FunctionId,
-    ) -> Self::FunctionAnnotation;
-    type BlockAnnotation: Debug + Clone + Serialize;
-    fn construct_block_annotation(
-        &mut self,
-        left_brace_token: &Locatable<Token>,
-        statements: &[BlockItem<Self>],
-        right_brace_token: &Locatable<Token>,
-    ) -> Self::BlockAnnotation;
-    type StatementAnnotation: Debug + Clone + Serialize;
-    fn construct_expression_statement_annotation(
-        &mut self,
-        expr: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
-    ) -> Self::StatementAnnotation;
-    fn construct_assignment_annotation(
-        &mut self,
-        identifier_token: &Locatable<Token>,
-        equals_token: &Locatable<Token>,
-        value: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
-    ) -> Self::StatementAnnotation;
-    fn construct_var_decl_annotation(
-        &mut self,
-        let_token: &Locatable<Token>,
-        identifier_token: &Locatable<Token>,
-        colon_token: &Locatable<Token>,
-        type_node: &ASTTypeNode<Self>,
-        equals_token: &Locatable<Token>,
-        value: &Expression<Self>,
-        semicolon_token: &Locatable<Token>,
-        variable_index: &VariableId,
-    ) -> Self::StatementAnnotation;
-    type ExpressionAnnotation: Debug + Clone + Serialize;
-    fn construct_string_literal_annotation(
-        &mut self,
-        string_token: &Locatable<Token>,
-        value: &str,
-    ) -> Self::ExpressionAnnotation;
-    fn construct_int_literal_annotation(
-        &mut self,
-        int_token: &Locatable<Token>,
-        int_value: &str,
-        type_node: &ASTTypeNode<Self>,
-        parsed_value: &IntLiteral,
-    ) -> Self::ExpressionAnnotation;
-    fn construct_array_access_annotation(
-        &mut self,
-        array: &VariableAccess<Self>,
-        left_bracket_token: &Locatable<Token>,
-        index_expr: &Expression<Self>,
-        right_bracket_token: &Locatable<Token>,
-    ) -> Self::ExpressionAnnotation;
-    fn construct_fn_call_annotation(
-        &mut self,
-        qualified_name: &QualifiedName<Self>,
-        left_paren_token: &Locatable<Token>,
-        arguments: &[Expression<Self>],
-        comma_tokens: &[Locatable<Token>],
-        right_paren_token: &Locatable<Token>,
-    ) -> Self::ExpressionAnnotation;
-    fn construct_variable_access_expression_annotation(
-        &mut self,
-        variable_access: &VariableAccess<Self>,
-    ) -> Self::ExpressionAnnotation;
-    type VariableAccessAnnotation: Debug + Clone + Serialize;
-    fn construct_variable_access_annotation(
-        &mut self,
-        name_token: &Locatable<Token>,
-        name: &str,
-        variable_id: &VariableId,
-    ) -> Self::VariableAccessAnnotation;
-    type QualifiedIdentifierAnnotation: Debug + Clone + Serialize;
-    fn construct_qualified_identifier_annotation(
-        &mut self,
-        identifier_tokens: &[Locatable<Token>],
-        double_colon_tokens: &[Locatable<Token>],
-        parts: &[String],
-        name: &str,
-    ) -> Self::QualifiedIdentifierAnnotation;
-    type ASTTypeNodeAnnotation: Debug + Clone + Serialize;
-    fn construct_simple_type_node_annotation(
-        &mut self,
-        type_token: &Locatable<Token>,
-        kind: &ASTTypeKind,
-    ) -> Self::ASTTypeNodeAnnotation;
-    fn construct_str_type_node_annotation(
-        &mut self,
-        type_token: &Locatable<Token>,
-        kind: &ASTTypeKind,
-        left_angle_token: &Locatable<Token>,
-        size_token: &Locatable<Token>,
-        right_angle_token: &Locatable<Token>,
-    ) -> Self::ASTTypeNodeAnnotation;
-}
+// Parameter struct definitions
 
 #[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum ParsingErrorKind {
@@ -239,183 +120,6 @@ impl Display for ParsingError {
 impl std::error::Error for ParsingError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.kind.source()
-    }
-}
-
-impl ASTAnnotation for () {
-    type ProgramAnnotation = ();
-
-    fn construct_program_annotation(
-        &mut self,
-        _functions: &[Function<Self>],
-        _function_name_mapping: &HashMap<FunctionId, String>,
-    ) -> Self::ProgramAnnotation {
-        ()
-    }
-
-    type FunctionParamAnnotation = ();
-
-    fn construct_function_param_annotation(
-        &mut self,
-        _identifier_token: &Locatable<Token>,
-        _colon_token: &Locatable<Token>,
-        _type_node: &ASTTypeNode<Self>,
-        _variable_index: &VariableId,
-    ) -> Self::FunctionParamAnnotation {
-        ()
-    }
-
-    type FunctionAnnotation = ();
-
-    fn construct_function_annotation(
-        &mut self,
-        _fn_token: &Locatable<Token>,
-        _name_token: &Locatable<Token>,
-        _left_paren_token: &Locatable<Token>,
-        _params: &[FunctionParam<Self>],
-        _comma_tokens: &[Locatable<Token>],
-        _right_paren_token: &Locatable<Token>,
-        _body: &Block<Self>,
-        _function_id: &FunctionId,
-    ) -> Self::FunctionAnnotation {
-        ()
-    }
-
-    type BlockAnnotation = ();
-
-    fn construct_block_annotation(
-        &mut self,
-        _left_brace_token: &Locatable<Token>,
-        _statements: &[BlockItem<Self>],
-        _right_brace_token: &Locatable<Token>,
-    ) -> Self::BlockAnnotation {
-        ()
-    }
-
-    type StatementAnnotation = ();
-
-    fn construct_expression_statement_annotation(
-        &mut self,
-        _expr: &Expression<Self>,
-        _semicolon_token: &Locatable<Token>,
-    ) -> Self::StatementAnnotation {
-        ()
-    }
-
-    fn construct_assignment_annotation(
-        &mut self,
-        _identifier_token: &Locatable<Token>,
-        _equals_token: &Locatable<Token>,
-        _value: &Expression<Self>,
-        _semicolon_token: &Locatable<Token>,
-    ) -> Self::StatementAnnotation {
-        ()
-    }
-
-    fn construct_var_decl_annotation(
-        &mut self,
-        _let_token: &Locatable<Token>,
-        _identifier_token: &Locatable<Token>,
-        _colon_token: &Locatable<Token>,
-        _type_node: &ASTTypeNode<Self>,
-        _equals_token: &Locatable<Token>,
-        _value: &Expression<Self>,
-        _semicolon_token: &Locatable<Token>,
-        _variable_index: &VariableId,
-    ) -> Self::StatementAnnotation {
-        ()
-    }
-
-    type ExpressionAnnotation = ();
-
-    fn construct_string_literal_annotation(
-        &mut self,
-        _string_token: &Locatable<Token>,
-        _value: &str,
-    ) -> Self::ExpressionAnnotation {
-        ()
-    }
-
-    fn construct_int_literal_annotation(
-        &mut self,
-        _int_token: &Locatable<Token>,
-        _int_value: &str,
-        _type_node: &ASTTypeNode<Self>,
-        _parsed_value: &IntLiteral,
-    ) -> Self::ExpressionAnnotation {
-        ()
-    }
-
-    fn construct_array_access_annotation(
-        &mut self,
-        _array: &VariableAccess<Self>,
-        _left_bracket_token: &Locatable<Token>,
-        _index_expr: &Expression<Self>,
-        _right_bracket_token: &Locatable<Token>,
-    ) -> Self::ExpressionAnnotation {
-        ()
-    }
-
-    fn construct_fn_call_annotation(
-        &mut self,
-        _qualified_name: &QualifiedName<Self>,
-        _left_paren_token: &Locatable<Token>,
-        _arguments: &[Expression<Self>],
-        _comma_tokens: &[Locatable<Token>],
-        _right_paren_token: &Locatable<Token>,
-    ) -> Self::ExpressionAnnotation {
-        ()
-    }
-
-    type VariableAccessAnnotation = ();
-
-    fn construct_variable_access_annotation(
-        &mut self,
-        _name_token: &Locatable<Token>,
-        _name: &str,
-        _variable_id: &VariableId,
-    ) -> Self::VariableAccessAnnotation {
-        ()
-    }
-
-    type QualifiedIdentifierAnnotation = ();
-
-    fn construct_qualified_identifier_annotation(
-        &mut self,
-        _identifier_tokens: &[Locatable<Token>],
-        _double_colon_tokens: &[Locatable<Token>],
-        _parts: &[String],
-        _name: &str,
-    ) -> Self::QualifiedIdentifierAnnotation {
-        ()
-    }
-
-    fn construct_variable_access_expression_annotation(
-        &mut self,
-        _variable_access: &VariableAccess<Self>,
-    ) -> Self::ExpressionAnnotation {
-        ()
-    }
-
-    type ASTTypeNodeAnnotation = ();
-
-    fn construct_simple_type_node_annotation(
-        &mut self,
-        _type_token: &Locatable<Token>,
-        _kind: &ASTTypeKind,
-    ) -> Self::ASTTypeNodeAnnotation {
-        ()
-    }
-
-    fn construct_str_type_node_annotation(
-        &mut self,
-        _type_token: &Locatable<Token>,
-        _kind: &ASTTypeKind,
-        _left_angle_token: &Locatable<Token>,
-        _size_token: &Locatable<Token>,
-        _right_angle_token: &Locatable<Token>,
-    ) -> Self::ASTTypeNodeAnnotation {
-        ()
     }
 }
 
@@ -624,7 +328,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         } else {
             let found = self.peek().expect("Expected a token to be available");
 
-            return Err(ParsingError {
+            Err(ParsingError {
                 src: Self::source_for_token(found),
                 span: found.loc.span,
                 kind: ParsingErrorKind::WrongToken {
@@ -632,7 +336,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     found: found.value.clone(),
                 },
             }
-            .into());
+            .into())
         }
     }
 
@@ -647,8 +351,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         }
         let annotation = Annotation::construct_program_annotation(
             self.annotation_processor,
-            &functions,
-            &self.function_name_mapping,
+            ast_annotation::ConstructProgramAnnotationParams {
+                functions: &functions,
+                function_name_mapping: &self.function_name_mapping,
+            },
         );
         Ok(Program {
             functions,
@@ -725,10 +431,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
             let param_annotation = Annotation::construct_function_param_annotation(
                 self.annotation_processor,
-                &param_identifier_token,
-                &param_colon_token,
-                &param_type,
-                &var_index,
+                ast_annotation::ConstructFunctionParamAnnotationParams {
+                    identifier_token: &param_identifier_token,
+                    colon_token: &param_colon_token,
+                    type_node: &param_type,
+                    variable_index: &var_index,
+                },
             );
             params.push(FunctionParam {
                 variable_index: var_index,
@@ -750,14 +458,16 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_function_annotation(
             self.annotation_processor,
-            &fn_token,
-            &name_token,
-            &left_paren_token,
-            &params,
-            &param_comma_tokens,
-            &right_paren_token,
-            &body,
-            &id,
+            ast_annotation::ConstructFunctionAnnotationParams {
+                fn_token: &fn_token,
+                name_token: &name_token,
+                left_paren_token: &left_paren_token,
+                params: &params,
+                comma_tokens: &param_comma_tokens,
+                right_paren_token: &right_paren_token,
+                body: &body,
+                function_id: &id,
+            },
         );
         Ok(Function {
             name,
@@ -782,9 +492,11 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         self.variable_tracker.pop();
         let annotation = Annotation::construct_block_annotation(
             self.annotation_processor,
-            &left_brace_token,
-            &statements,
-            &right_brace_token,
+            ast_annotation::ConstructBlockAnnotationParams {
+                left_brace_token: &left_brace_token,
+                statements: &statements,
+                right_brace_token: &right_brace_token,
+            },
         );
         Ok(Block {
             statements,
@@ -820,8 +532,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                         let semicolon_token = self.expect(Token::Semicolon)?;
                         let annotation = Annotation::construct_expression_statement_annotation(
                             self.annotation_processor,
-                            &parsed_expr,
-                            &semicolon_token,
+                            ast_annotation::ConstructExpressionStatementAnnotationParams {
+                                expr: &parsed_expr,
+                                semicolon_token: &semicolon_token,
+                            },
                         );
                         Ok(Statement::Expression {
                             expr: parsed_expr,
@@ -835,8 +549,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 let semicolon_token = self.expect(Token::Semicolon)?;
                 let annotation = Annotation::construct_expression_statement_annotation(
                     self.annotation_processor,
-                    &parsed_expr,
-                    &semicolon_token,
+                    ast_annotation::ConstructExpressionStatementAnnotationParams {
+                        expr: &parsed_expr,
+                        semicolon_token: &semicolon_token,
+                    },
                 );
                 Ok(Statement::Expression {
                     expr: parsed_expr,
@@ -909,18 +625,20 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_var_decl_annotation(
             self.annotation_processor,
-            &let_token,
-            &identifier_token,
-            &colon_token,
-            &type_,
-            &equals_token,
-            &expr_ast,
-            &semicolon_token,
-            &var_index,
+            ast_annotation::ConstructVarDeclAnnotationParams {
+                let_token: &let_token,
+                identifier_token: &identifier_token,
+                colon_token: &colon_token,
+                type_node: &type_,
+                equals_token: &equals_token,
+                value: &expr_ast,
+                semicolon_token: &semicolon_token,
+                variable_index: &var_index,
+            },
         );
         Ok(Statement::VarDecl {
             name,
-            type_: type_,
+            type_,
             value: expr_ast,
             variable_index: var_index,
             annotation,
@@ -969,10 +687,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         })?;
         let annotation = Annotation::construct_assignment_annotation(
             self.annotation_processor,
-            &identifier_token,
-            &equals_token,
-            &expr_ast,
-            &semicolon_token,
+            ast_annotation::ConstructAssignmentAnnotationParams {
+                identifier_token: &identifier_token,
+                equals_token: &equals_token,
+                value: &expr_ast,
+                semicolon_token: &semicolon_token,
+            },
         );
         Ok(Statement::Assignment {
             var: var_index,
@@ -984,7 +704,6 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     fn parse_function_call(&mut self) -> ParseResult<Expression<Annotation>> {
         // Grammar: ID "(" ")" or ID ("::" ID)* "(" Arguments? ")"
         let qualified_name = self.parse_qualified_identifier()?;
-        let name = qualified_name.parts.join("::");
 
         let left_paren = self.expect(Token::LParen)?;
 
@@ -1009,11 +728,13 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_fn_call_annotation(
             self.annotation_processor,
-            &qualified_name,
-            &left_paren,
-            &args,
-            &comma_tokens,
-            &right_paren,
+            ast_annotation::ConstructFnCallAnnotationParams {
+                qualified_name: &qualified_name,
+                left_paren_token: &left_paren,
+                arguments: &args,
+                comma_tokens: &comma_tokens,
+                right_paren_token: &right_paren,
+            },
         );
         Ok(Expression::FnCall {
             qualified_name,
@@ -1080,10 +801,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         let name = parts.join("::");
         let annotation = Annotation::construct_qualified_identifier_annotation(
             self.annotation_processor,
-            &identifier_tokens,
-            &double_colon_tokens,
-            &parts,
-            &name,
+            ast_annotation::ConstructQualifiedIdentifierAnnotationParams {
+                identifier_tokens: &identifier_tokens,
+                double_colon_tokens: &double_colon_tokens,
+                parts: &parts,
+                name: &name,
+            },
         );
 
         Ok(QualifiedName { parts, annotation })
@@ -1110,7 +833,9 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                         let annotation =
                             Annotation::construct_variable_access_expression_annotation(
                                 self.annotation_processor,
-                                &var,
+                                ast_annotation::ConstructVariableAccessExpressionAnnotationParams {
+                                    variable_access: &var,
+                                },
                             );
                         Ok(Expression::VariableAccess {
                             value: var,
@@ -1130,9 +855,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         }
     }
 
-    fn build_int_parse_error(
+    fn int_parse_error_message(
         &self,
-        int_token: &Locatable<Token>,
         type_: &ASTTypeNode<Annotation>,
         parse_error: &std::num::ParseIntError,
     ) -> String {
@@ -1172,7 +896,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             _ => "unknown",
         };
 
-        return match parse_error.kind() {
+        match parse_error.kind() {
             IntErrorKind::Empty => format!(
                 "Cannot parse integer literal: empty string cannot be parsed as {}",
                 int_str
@@ -1193,7 +917,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 unreachable!("There is no non-zero types parsed for integer literals")
             }
             _ => unreachable!("Unknown IntErrorKind"),
-        };
+        }
     }
 
     fn parse_int_literal(&mut self) -> ParseResult<Expression<Annotation>> {
@@ -1220,8 +944,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         let type_token = self.parse_type()?;
 
         let parsed_value = match &type_token.kind {
-            ASTTypeKind::U8 => IntLiteral::U8((&int_value).parse::<u8>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::U8 => IntLiteral::U8(int_value.parse::<u8>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1230,8 +954,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::I8 => IntLiteral::I8((&int_value).parse::<i8>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::I8 => IntLiteral::I8(int_value.parse::<i8>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1240,8 +964,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::U16 => IntLiteral::U16((&int_value).parse::<u16>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::U16 => IntLiteral::U16(int_value.parse::<u16>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1250,8 +974,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::I16 => IntLiteral::I16((&int_value).parse::<i16>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::I16 => IntLiteral::I16(int_value.parse::<i16>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1260,8 +984,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::I16 => IntLiteral::I16((&int_value).parse::<i16>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::U32 => IntLiteral::U32(int_value.parse::<u32>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1270,8 +994,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::U32 => IntLiteral::U32((&int_value).parse::<u32>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::I32 => IntLiteral::I32(int_value.parse::<i32>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1280,8 +1004,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::I32 => IntLiteral::I32((&int_value).parse::<i32>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::U64 => IntLiteral::U64(int_value.parse::<u64>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1290,18 +1014,8 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     },
                 }
             })?),
-            ASTTypeKind::U64 => IntLiteral::U64((&int_value).parse::<u64>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
-                ParsingError {
-                    src: Self::source_for_token(&int_token),
-                    span: int_token.loc.span,
-                    kind: ParsingErrorKind::InvalidIntLiteral {
-                        message: error_message,
-                    },
-                }
-            })?),
-            ASTTypeKind::I64 => IntLiteral::I64((&int_value).parse::<i64>().map_err(|e| {
-                let error_message = self.build_int_parse_error(&int_token, &type_token, &e);
+            ASTTypeKind::I64 => IntLiteral::I64(int_value.parse::<i64>().map_err(|e| {
+                let error_message = self.int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1322,10 +1036,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_int_literal_annotation(
             self.annotation_processor,
-            &int_token,
-            &int_value,
-            &type_token,
-            &parsed_value,
+            ast_annotation::ConstructIntLiteralAnnotationParams {
+                int_token: &int_token,
+                int_value: &int_value,
+                type_node: &type_token,
+                parsed_value: &parsed_value,
+            },
         );
         Ok(Expression::IntLiteral {
             value: parsed_value,
@@ -1356,8 +1072,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_string_literal_annotation(
             self.annotation_processor,
-            &str_token,
-            &str_value,
+            ast_annotation::ConstructStringLiteralAnnotationParams {
+                string_token: &str_token,
+                value: &str_value,
+            },
         );
         Ok(Expression::StringLiteral {
             value: str_value,
@@ -1377,10 +1095,12 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
         let annotation = Annotation::construct_array_access_annotation(
             self.annotation_processor,
-            &variable_access,
-            &left_bracket,
-            &index_expr,
-            &right_bracket,
+            ast_annotation::ConstructArrayAccessAnnotationParams {
+                array: &variable_access,
+                left_bracket_token: &left_bracket,
+                index_expr: &index_expr,
+                right_bracket_token: &right_bracket,
+            },
         );
 
         Ok(Expression::ArrayAccess {
@@ -1431,9 +1151,11 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             id: var_index,
             annotation: Annotation::construct_variable_access_annotation(
                 self.annotation_processor,
-                &name_token,
-                &name,
-                &var_index,
+                ast_annotation::ConstructVariableAccessAnnotationParams {
+                    name_token: &name_token,
+                    name: &name,
+                    variable_id: &var_index,
+                },
             ),
         })
     }
@@ -1451,8 +1173,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1462,8 +1186,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1473,8 +1199,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1484,8 +1212,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1495,8 +1225,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1506,8 +1238,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1517,8 +1251,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1528,8 +1264,10 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_simple_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
+                        ast_annotation::ConstructSimpleTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                        },
                     ),
                 })
             }
@@ -1560,11 +1298,13 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     kind,
                     annotation: Annotation::construct_str_type_node_annotation(
                         self.annotation_processor,
-                        &t,
-                        &kind,
-                        &left_angle,
-                        &size_token,
-                        &right_angle,
+                        ast_annotation::ConstructStrTypeNodeAnnotationParams {
+                            type_token: &t,
+                            kind: &kind,
+                            left_angle_token: &left_angle,
+                            size_token: &size_token,
+                            right_angle_token: &right_angle,
+                        },
                     ),
                 })
             }

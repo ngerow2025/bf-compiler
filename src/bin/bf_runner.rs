@@ -23,7 +23,7 @@ impl BfInterpreter {
     }
 
     fn run(&mut self, code: &str) {
-        let mut code_chars: Vec<char> = code.chars().collect();
+        let code_chars: Vec<char> = code.chars().collect();
         let mut pc: usize = 0;
         let mut loop_stack: Vec<usize> = Vec::new();
 

@@ -82,6 +82,34 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
     bf_code
 }
 
+macro_rules! bf_vec {
+    // 1. Match "list <ident>"
+    (list $extra:ident $(, $($tail:tt)*)?) => {
+        {
+            let mut v = Vec::new();
+            v.extend($extra);
+            $( v.extend(bf_vec!($($tail)*)); )?
+            v
+        }
+    };
+
+    // 2. Match "<ident>::<ident>" (Path)
+    ($instr:path $(, $($tail:tt)*)?) => {
+        #[allow(clippy::vec_init_then_push)]
+        {
+            let mut v = Vec::new();
+            v.push($instr);
+            $( v.extend(bf_vec!($($tail)*)); )?
+            v
+        }
+    };
+
+    // 3. Base case: end of list
+    () => {
+        Vec::<BfInstruction>::new()
+    };
+}
+
 fn codegen_switch_statement(
     remaining_cases: Vec<(LocationId, Vec<BfInstruction>)>,
     current_subtracted_val: usize,
@@ -89,62 +117,62 @@ fn codegen_switch_statement(
 ) -> Vec<BfInstruction> {
     match remaining_cases.split_first() {
         Some(((location_id, case_instructions), rest_cases)) => {
-            let mut code = Vec::new();
             let diff = location_id.0 - current_subtracted_val;
-            code.extend(vec![BfInstruction::Dec; diff]);
-            code.push(BfInstruction::LoopStart);
-            code.extend(codegen_switch_statement(
-                Vec::from(rest_cases),
-                location_id.0,
-                default_case,
-            ));
-            code.push(BfInstruction::LoopEnd);
-            code.push(BfInstruction::Right); //move to the flag
-            code.push(BfInstruction::LoopStart); //check the flag
-            code.push(BfInstruction::Dec); //turn off the flag
-            code.push(BfInstruction::Left); //move to address, this is now zero
-            code.push(BfInstruction::Left); //move to the return address, start setting up for the return jump
-            code.push(BfInstruction::LoopStart); //move the return address to the jump location
-            code.push(BfInstruction::Dec);
-            code.push(BfInstruction::Right);
-            code.push(BfInstruction::Inc);
-            code.push(BfInstruction::Left);
-            code.push(BfInstruction::LoopEnd);
+            let difference_code = vec![BfInstruction::Dec; diff];
+            let switch_statement_code =
+                codegen_switch_statement(Vec::from(rest_cases), location_id.0, default_case);
 
-            code.push(BfInstruction::Right); //move to the new base 
-            code.push(BfInstruction::Right);
-            code.push(BfInstruction::Right);
+            bf_vec![
+                list difference_code,
+                BfInstruction::LoopStart,
+                list switch_statement_code,
 
-            code.extend(case_instructions);
+                BfInstruction::LoopEnd,
+                BfInstruction::Right, //move to the flag
+                BfInstruction::LoopStart, //check the flag
+                BfInstruction::Dec, //turn off the flag
+                BfInstruction::Left, //move to address, this is now zero
+                BfInstruction::Left, //move to the return address, start setting up for the return jump
+                BfInstruction::LoopStart, //move the return address to the jump location
+                BfInstruction::Dec,
+                BfInstruction::Right,
+                BfInstruction::Inc,
+                BfInstruction::Left,
+                BfInstruction::LoopEnd,
 
-            code.push(BfInstruction::Left); //move back to the target address
-            code.push(BfInstruction::Left);
+                BfInstruction::Right, //move to the new base
+                BfInstruction::Right,
+                BfInstruction::Right,
 
-            code.push(BfInstruction::LoopEnd);
+                list case_instructions,
 
-            code
+                BfInstruction::Left, //move back to the target address
+                BfInstruction::Left,
+
+                BfInstruction::LoopEnd
+            ]
         }
         None => {
-            let mut code = Vec::new();
-            code.push(BfInstruction::Right); //move to the flag
-            code.push(BfInstruction::Dec); //turn off the flag
-            code.push(BfInstruction::Left); //move to the target address
-            code.push(BfInstruction::Left); //move to the return address, start setting up for the return jump
-            code.push(BfInstruction::LoopStart); //move the return address to the jump location
-            code.push(BfInstruction::Dec);
-            code.push(BfInstruction::Right);
-            code.push(BfInstruction::Inc);
-            code.push(BfInstruction::Left);
-            code.push(BfInstruction::LoopEnd);
-            code.push(BfInstruction::Right); //move to the new base
-            code.push(BfInstruction::Right);
-            code.push(BfInstruction::Right);
+            bf_vec![
+                BfInstruction::Right, //move to the flag
+                BfInstruction::Dec, //turn off the flag
+                BfInstruction::Left, //move to the target address
+                BfInstruction::Left, //move to the return address, start setting up for the return jump
+                BfInstruction::LoopStart, //move the return address to the jump location
+                BfInstruction::Dec,
+                BfInstruction::Right,
+                BfInstruction::Inc,
+                BfInstruction::Left,
+                BfInstruction::LoopEnd,
+                BfInstruction::Right, //move to the new base
+                BfInstruction::Right,
+                BfInstruction::Right,
 
-            code.extend(default_case);
-            code.push(BfInstruction::Left); //move back to the target address
-            code.push(BfInstruction::Left);
+                list default_case,
 
-            code
+                BfInstruction::Left, //move back to the target address
+                BfInstruction::Left,
+            ]
         }
     }
 }

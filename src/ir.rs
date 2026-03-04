@@ -47,7 +47,6 @@ pub struct IrRegisterId(usize);
 #[derive(Debug, Clone)]
 pub struct IrRegister {
     pub size: usize,
-    id: IrRegisterId,
 }
 
 #[derive(Debug)]
@@ -61,14 +60,12 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
     ast.functions
         .iter()
         .map(|func| {
-            let mut function_lowerer = FunctionLowerer::new(&ast.functions);
-            let code = function_lowerer.lower_function(func);
+            let (code, register_tracker) = lower_function(func);
             let parameter_registers = func
                 .params
                 .iter()
                 .map(|param| {
-                    function_lowerer
-                        .registers
+                    register_tracker
                         .lookup_register(&param.variable_index)
                         .unwrap()
                 })
@@ -76,7 +73,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
             IrFunction {
                 code,
                 id: func.id,
-                registers: function_lowerer.registers.registers,
+                registers: register_tracker.registers,
                 parameters: parameter_registers,
             }
         })
@@ -121,7 +118,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                     })
                     .collect();
                 let mut new_registers = old_registers.clone();
-                new_registers.retain(|k, v| !deleted_registers.contains(k));
+                new_registers.retain(|k, _| !deleted_registers.contains(k));
                 IrFunction {
                     id,
                     parameters,
@@ -133,63 +130,62 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
         .collect()
 }
 
-struct RegisterTracker {
+#[derive(Debug, Clone)]
+pub struct RegisterTracker {
     registers: HashMap<IrRegisterId, IrRegister>,
     variable_mapping: HashMap<VariableId, IrRegisterId>,
 }
 
+pub fn lower_function(function: &TypedFunction) -> (Vec<IrInstruction>, RegisterTracker) {
+    let mut function_lowerer = FunctionLowerer::new();
+    let code = function_lowerer.lower_function(function);
+    (code, function_lowerer.register_tracker())
+}
+
+impl Default for RegisterTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RegisterTracker {
-    fn new() -> Self {
+    pub fn new() -> Self {
         RegisterTracker {
             registers: HashMap::new(),
             variable_mapping: HashMap::new(),
         }
     }
 
-    fn create_register(&mut self, var_id: VariableId, size: usize) -> IrRegisterId {
+    pub fn create_register(&mut self, var_id: VariableId, size: usize) -> IrRegisterId {
         let new_reg_id = IrRegisterId(self.registers.len());
-        self.registers.insert(
-            new_reg_id,
-            IrRegister {
-                size,
-                id: new_reg_id,
-            },
-        );
+        self.registers.insert(new_reg_id, IrRegister { size });
         self.variable_mapping.insert(var_id, new_reg_id);
         new_reg_id
     }
 
-    fn lookup_register(&self, var_id: &VariableId) -> Option<IrRegisterId> {
+    pub fn lookup_register(&self, var_id: &VariableId) -> Option<IrRegisterId> {
         self.variable_mapping.get(var_id).cloned()
     }
 
-    fn lookup_register_from_id(&self, reg_id: IrRegisterId) -> Option<&IrRegister> {
+    pub fn lookup_register_from_id(&self, reg_id: IrRegisterId) -> Option<&IrRegister> {
         self.registers.get(&reg_id)
     }
 
-    fn create_intermediate_register(&mut self, size: usize) -> IrRegisterId {
+    pub fn create_intermediate_register(&mut self, size: usize) -> IrRegisterId {
         let new_reg_id = IrRegisterId(self.registers.len());
-        self.registers.insert(
-            new_reg_id,
-            IrRegister {
-                size,
-                id: new_reg_id,
-            },
-        );
+        self.registers.insert(new_reg_id, IrRegister { size });
         new_reg_id
     }
 }
 
-struct FunctionLowerer<'a> {
+struct FunctionLowerer {
     registers: RegisterTracker,
-    function_list: &'a Vec<TypedFunction>,
 }
 
-impl<'a> FunctionLowerer<'a> {
-    fn new(function_list: &'a Vec<TypedFunction>) -> Self {
+impl FunctionLowerer {
+    fn new() -> Self {
         FunctionLowerer {
             registers: RegisterTracker::new(),
-            function_list,
         }
     }
 
@@ -272,7 +268,7 @@ impl<'a> FunctionLowerer<'a> {
                 }];
                 (new_reg, instructions)
             }
-            TypedExpression::Variable { variable, type_ } => {
+            TypedExpression::Variable { variable, type_: _ } => {
                 let reg = self
                     .registers
                     .lookup_register(variable)
@@ -324,6 +320,10 @@ impl<'a> FunctionLowerer<'a> {
                 (output_reg, instructions)
             }
         }
+    }
+
+    fn register_tracker(&self) -> RegisterTracker {
+        self.registers.clone()
     }
 }
 

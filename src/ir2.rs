@@ -12,30 +12,30 @@ use crate::{
 
 fn get_instruction_dependencies(instr: &IrInstruction) -> Vec<IrRegisterId> {
     match instr {
-        IrInstruction::Move { target, source } => match source {
+        IrInstruction::Move { target: _, source } => match source {
             IrMoveOperand::Register(src_reg) => vec![*src_reg],
             _ => vec![],
         },
         IrInstruction::IndirectRead {
             base,
             offset,
-            output,
+            output: _,
         } => {
             vec![*base, *offset]
         }
         IrInstruction::IndirectWrite {
-            base,
+            base: _,
             offset,
             value,
         } => {
             vec![*offset, *value]
         }
         IrInstruction::Call {
-            function_id,
+            function_id: _,
             parameters,
-            output,
+            output: _,
         } => parameters.clone(),
-        IrInstruction::Input { target } => {
+        IrInstruction::Input { .. } => {
             vec![]
         }
         IrInstruction::Output { element } => {
@@ -91,13 +91,13 @@ fn get_function_register_lifetimes(
     function: &IrFunction,
 ) -> HashMap<IrRegisterId, Vec<RegisterLifetimeEvent>> {
     //this will track the usages of every single register used in the function
-    let mut registerUseages = HashMap::new();
+    let mut register_useages = HashMap::new();
     for (index, instruction) in function.code.iter().enumerate() {
         let dependencies = get_instruction_dependencies(instruction);
         let dependents = get_instruction_dependents(instruction);
         for dep in dependencies {
             //mark a read event for this register
-            let events = registerUseages.entry(dep).or_insert(vec![]);
+            let events = register_useages.entry(dep).or_insert(vec![]);
             events.push(RegisterLifetimeEvent {
                 kind: RegisterLifetimeEventKind::Read,
                 instruction_index: index,
@@ -105,25 +105,25 @@ fn get_function_register_lifetimes(
         }
         for dep in dependents {
             //mark a write event for this register
-            let events = registerUseages.entry(dep).or_insert(vec![]);
+            let events = register_useages.entry(dep).or_insert(vec![]);
             events.push(RegisterLifetimeEvent {
                 kind: RegisterLifetimeEventKind::Write,
                 instruction_index: index,
             });
         }
     }
-    registerUseages
+    register_useages
 }
 
 pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
-    let registerUsages = get_function_register_lifetimes(function);
+    let register_usages = get_function_register_lifetimes(function);
     let max_instruction_length = function
         .code
         .iter()
         .map(|instr| format!("{}", instr).len())
         .max()
         .unwrap_or(0);
-    let general_lifetimes: HashMap<IrRegisterId, (usize, usize)> = registerUsages
+    let general_lifetimes: HashMap<IrRegisterId, (usize, usize)> = register_usages
         .iter()
         .map(|(reg_id, events)| {
             let first_use = events.iter().map(|e| e.instruction_index).min().unwrap();
@@ -152,7 +152,7 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
                 print!(" ");
             } else {
                 //alive at this point
-                let events = &registerUsages[reg_id];
+                let events = &register_usages[reg_id];
                 let mut event_str = String::new();
                 for event in events {
                     if event.instruction_index == index {
@@ -337,10 +337,9 @@ pub struct Ir2Function {
 }
 
 #[derive(Debug, Clone)]
-struct Ir2FunctionMetadata {
+pub struct Ir2FunctionMetadata {
     parameter_layout: Vec<PhysicalLocation>,
     // output_location: PhysicalLocation,
-    id: FunctionId,
 }
 
 //TODO: consider if we should return the original registers and the mapping to physical locations
@@ -372,7 +371,7 @@ fn lower_ir_function(
         .parameter_layout
         .iter()
         .enumerate()
-        .max_by_key(|(i, p)| p.0)
+        .max_by_key(|(_, p)| p.0)
     {
         let last_param_size = function
             .registers
@@ -628,7 +627,7 @@ fn lower_ir_function(
             IrInstruction::Call {
                 function_id,
                 parameters,
-                output,
+                output: _,
             } => {
                 let function_metadata = global_function_metadata
                     .get(function_id)
@@ -762,63 +761,39 @@ fn lower_ir_function(
                     .get(offset)
                     .expect("expected valid register");
 
-                let mut code_sequence = vec![];
-
                 //move offset -> tmp_offset, usage_offset
                 //indirect read base, usage_offset -> tmp_output
                 //move tmp_output -> output, tmp_output_2
                 //move tmp_offset -> offset, usage_offset
                 //indirect write base, usage_offset, tmp_output_2
 
-                code_sequence.push(match offset_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: *offset_location,
-                        targets: vec![tmp_offset_location, usage_offset_location],
-                    },
-                    _ => Ir2Instruction::BulkNMove {
+                vec![
+                    Ir2Instruction::BulkNMove {
                         source: *offset_location,
                         targets: vec![tmp_offset_location, usage_offset_location],
                         size: offset_register.size,
                     },
-                });
-
-                code_sequence.push(Ir2Instruction::MoveFromIndirect {
-                    base: *base_location,
-                    offset: usage_offset_location,
-                    output: tmp_output_location_1,
-                });
-
-                code_sequence.push(match output_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: tmp_output_location_1,
-                        targets: vec![*output_location, tmp_output_location_2],
+                    Ir2Instruction::MoveFromIndirect {
+                        base: *base_location,
+                        offset: usage_offset_location,
+                        output: tmp_output_location_1,
                     },
-                    _ => Ir2Instruction::BulkNMove {
+                    Ir2Instruction::BulkNMove {
                         source: tmp_output_location_1,
                         targets: vec![*output_location, tmp_output_location_2],
                         size: output_register.size,
                     },
-                });
-
-                code_sequence.push(match offset_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: tmp_offset_location,
-                        targets: vec![*offset_location, usage_offset_location],
-                    },
-                    _ => Ir2Instruction::BulkNMove {
+                    Ir2Instruction::BulkNMove {
                         source: tmp_offset_location,
                         targets: vec![*offset_location, usage_offset_location],
                         size: offset_register.size,
                     },
-                });
-
-                code_sequence.push(Ir2Instruction::MoveToIndirect {
-                    base: *base_location,
-                    offset: usage_offset_location,
-                    value: tmp_output_location_2,
-                });
-
-                code_sequence
+                    Ir2Instruction::MoveToIndirect {
+                        base: *base_location,
+                        offset: usage_offset_location,
+                        value: tmp_output_location_2,
+                    },
+                ]
             }
             IrInstruction::IndirectWrite {
                 base,
@@ -874,16 +849,10 @@ fn lower_ir_function(
                 //indirect write base, usage_offset, usage_value
                 //move tmp_value -> value
 
-                code_sequence.push(match offset_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: *offset_location,
-                        targets: vec![tmp_offset_location, usage_offset_location],
-                    },
-                    _ => Ir2Instruction::BulkNMove {
-                        source: *offset_location,
-                        targets: vec![tmp_offset_location, usage_offset_location],
-                        size: offset_register.size,
-                    },
+                code_sequence.push(Ir2Instruction::BulkNMove {
+                    source: *offset_location,
+                    targets: vec![tmp_offset_location, usage_offset_location],
+                    size: offset_register.size,
                 });
 
                 code_sequence.push(Ir2Instruction::ClearIndirect {
@@ -891,28 +860,16 @@ fn lower_ir_function(
                     offset: usage_offset_location,
                 });
 
-                code_sequence.push(match value_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: *value_location,
-                        targets: vec![tmp_value_location, usage_value_location],
-                    },
-                    _ => Ir2Instruction::BulkNMove {
-                        source: *value_location,
-                        targets: vec![tmp_value_location, usage_value_location],
-                        size: value_register.size,
-                    },
+                code_sequence.push(Ir2Instruction::BulkNMove {
+                    source: *value_location,
+                    targets: vec![tmp_value_location, usage_value_location],
+                    size: value_register.size,
                 });
 
-                code_sequence.push(match offset_register.size {
-                    1 => Ir2Instruction::NMove {
-                        source: tmp_offset_location,
-                        targets: vec![*offset_location, usage_offset_location],
-                    },
-                    _ => Ir2Instruction::BulkNMove {
-                        source: tmp_offset_location,
-                        targets: vec![*offset_location, usage_offset_location],
-                        size: offset_register.size,
-                    },
+                code_sequence.push(Ir2Instruction::BulkNMove {
+                    source: tmp_offset_location,
+                    targets: vec![*offset_location, usage_offset_location],
+                    size: offset_register.size,
                 });
 
                 code_sequence.push(Ir2Instruction::MoveToIndirect {
@@ -971,7 +928,6 @@ pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Fu
         // current_offset += output_reg.size;
 
         let metadata = Ir2FunctionMetadata {
-            id: function.id,
             parameter_layout,
             // output_location,
         };

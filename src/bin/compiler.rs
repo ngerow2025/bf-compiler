@@ -1,12 +1,14 @@
-use compiler_bf_target::codegen::codegen_program;
-use compiler_bf_target::ir::generate_ir;
-use compiler_bf_target::ir2::generate_ir2;
+// use compiler_bf_target::codegen::codegen_program;
+// use compiler_bf_target::ir::generate_ir;
+// use compiler_bf_target::ir2::generate_ir2;
 use compiler_bf_target::source_annotation::SourceAnnotation;
 use compiler_bf_target::sources::SourceCodeOrigin;
-use compiler_bf_target::type_check::type_annotate_program;
-use compiler_bf_target::ucodegen::BfGenerator;
+// use compiler_bf_target::type_check::type_annotate_program;
+// use compiler_bf_target::ucodegen::BfGenerator;
 use compiler_bf_target::{
-    ir2::print_instruction_with_lifetime_annotations, parser, tokenizer::Lexer,
+    // ir2::print_instruction_with_lifetime_annotations,
+    parser,
+    tokenizer::Lexer,
 };
 
 use clap::Parser;
@@ -35,7 +37,7 @@ fn main() -> Result<()> {
     };
 
     let mut parser = parser::Parser::new(tokens, &mut source_annotator);
-    let ast = parser.parse_program();
+    let _ast = parser.parse_program();
 
     /*
     let type_checked = type_annotate_program(ast.clone().unwrap());

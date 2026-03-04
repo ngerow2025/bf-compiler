@@ -1,17 +1,16 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 
-use miette::Report;
-use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 use crate::codegen::{BfInstruction, codegen_program};
 use crate::ir::{IrFunction, generate_ir};
 use crate::ir2::{Ir2Function, generate_ir2};
-use crate::parser::{Function, FunctionId};
+use crate::parser::FunctionId;
 use crate::source_annotation::SourceAnnotation;
-use crate::sources::{SourceCodeOrigin, SourceLocation};
-use crate::tokenizer::{Lexer, LexingErrorCollection, Locatable, Token};
+use crate::sources::SourceCodeOrigin;
+use crate::tokenizer::{Lexer, Locatable, Token};
 use crate::type_check::{TypedProgram, type_annotate_program};
 use crate::ucodegen::UCodeProgram;
 
@@ -64,6 +63,10 @@ impl WasmTokens {
         self.tokens.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
     pub fn get(&self, index: usize) -> Option<WasmToken> {
         self.tokens.get(index).map(token_to_wasm)
     }
@@ -81,7 +84,6 @@ impl WasmTokens {
 #[wasm_bindgen]
 pub struct WasmAst {
     ast: crate::parser::Program<SourceAnnotation>,
-    source: Arc<String>,
 }
 
 #[wasm_bindgen]
@@ -335,12 +337,23 @@ impl WasmBfProgram {
         self.instructions.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.instructions.is_empty()
+    }
+
+    #[allow(clippy::inherent_to_string_shadow_display)]
     pub fn to_string(&self) -> String {
-        bf_program_string(&self.instructions)
+        format!("{}", self)
     }
 
     pub fn get_instruction(&self, index: usize) -> Option<String> {
         self.instructions.get(index).map(|i| i.to_string())
+    }
+}
+
+impl Display for WasmBfProgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", bf_program_string(&self.instructions))
     }
 }
 
@@ -395,33 +408,20 @@ fn bf_program_string(program: &[BfInstruction]) -> String {
 // Compilation Step Functions - Each returns an exported type
 // ============================================================================
 
-#[derive(Debug, Serialize)]
-struct TokenizationError {
-    error: LexingErrorCollection,
-}
-
 /// Tokenize source code and return a WasmTokens object
 #[wasm_bindgen]
 pub fn tokenize(source: &str) -> Result<WasmTokens, JsValue> {
     let mut lexer = Lexer::new(source, None);
-    let tokens = lexer.tokenize_with_locations();
-    let tokens = match tokens {
-        Ok(toks) => toks,
-        Err(e) => {
-            let tokenization_error = TokenizationError { error: e };
-            return Err(serde_wasm_bindgen::to_value(&tokenization_error)?);
-        }
-    };
     let tokens = lexer
         .tokenize_with_locations()
         .map_err(|e| serde_wasm_bindgen::to_value(&e));
 
     if let Err(e) = tokens {
-        return Err(e?);
+        Err(e?)
     } else {
-        return Ok(WasmTokens {
+        Ok(WasmTokens {
             tokens: tokens.unwrap(),
-        });
+        })
     }
 }
 
@@ -439,13 +439,10 @@ pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
         .map_err(|e| serde_wasm_bindgen::to_value(&e));
 
     if let Err(e) = ast {
-        return Err(e?);
+        Err(e?)
     } else {
         let ast = ast.unwrap();
-        return Ok(WasmAst {
-            ast,
-            source: source_arc,
-        });
+        Ok(WasmAst { ast })
     }
 }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{fmt::Display, ops::Deref};
 
 use logos::Logos;
-use miette::{Diagnostic, NamedSource, SourceCode, SourceSpan};
+use miette::{Diagnostic, NamedSource, SourceSpan};
 use serde::Serialize;
 use serde::ser::SerializeStruct;
 use thiserror::Error;
@@ -229,16 +229,14 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> std::result::Result<char, Lexing
                     kind: LexingErrorKind::UnexpectedCharacter,
                 });
             }
+        } else if !c.is_ascii() {
+            return Err(LexingError {
+                src: NamedSource::new("input", source.to_string()),
+                span: (span.start, span.end - span.start).into(),
+                kind: LexingErrorKind::InvalidCharLiteral(c),
+            });
         } else {
-            if !c.is_ascii() {
-                return Err(LexingError {
-                    src: NamedSource::new("input", source.to_string()),
-                    span: (span.start, span.end - span.start).into(),
-                    kind: LexingErrorKind::InvalidCharLiteral(c),
-                });
-            } else {
-                return Ok(c);
-            }
+            return Ok(c);
         }
     } else {
         return Err(LexingError {
