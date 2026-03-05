@@ -1,16 +1,30 @@
 # Backend Dockerfile for WASM compilation and watching
 FROM rust:1.93-bookworm
 
+ARG UID=1000
+ARG GID=1000
+
 # Install wasm-pack and cargo-watch
 RUN cargo install wasm-pack bacon --locked
 
 # Add wasm target
 RUN rustup target add wasm32-unknown-unknown
 
+RUN groupadd --gid ${GID} appuser \
+	&& useradd --uid ${UID} --gid ${GID} --create-home --shell /bin/bash appuser
+
+RUN mkdir -p /app/backend /app/3rd_party /app/web-frontend \
+	&& chown -R appuser:appuser /app
+
+ENV CARGO_HOME=/tmp/cargo
+ENV RUSTUP_HOME=/tmp/rustup
+
 WORKDIR /app/backend
 
 # Copy Rust project files
-COPY backend/Cargo.toml backend/Cargo.lock* backend/bacon.toml ./
+COPY --chown=appuser:appuser backend/Cargo.toml backend/Cargo.lock* backend/bacon.toml ./
+
+USER appuser
 
 CMD ["bacon", "wasm-build", "--headless"]
 

@@ -31,7 +31,7 @@ WORKDIR /app
 COPY web-frontend/package.json web-frontend/pnpm-lock.yaml web-frontend/pnpm-workspace.yaml* ./
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the frontend source
 COPY web-frontend/ ./

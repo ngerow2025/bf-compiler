@@ -4,6 +4,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev.backend
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./backend:/app/backend
       - ./3rd_party:/app/3rd_party
@@ -13,6 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev.frontend
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "5173:5173"
     volumes:

@@ -9,9 +9,13 @@ WORKDIR /app/web-frontend
 
 RUN corepack enable
 
-COPY web-frontend/package.json web-frontend/pnpm-lock.yaml* ./
+RUN mkdir -p /app/web-frontend && chown -R node:node /app
 
-RUN pnpm install
+USER node
+
+COPY --chown=node:node web-frontend/package.json web-frontend/pnpm-lock.yaml* ./
+
+RUN pnpm install --ignore-scripts
 
 EXPOSE 5173
 
