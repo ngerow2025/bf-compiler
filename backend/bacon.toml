@@ -3,6 +3,6 @@ command = [
     "wasm-pack", "build",
     "--dev",
     "--target",   "bundler",
-    "--out-dir",  "web-frontend/src/wasm",
+    "--out-dir",  "../web-frontend/src/wasm",
     "--out-name", "compiler_bf_target"
 ]

@@ -7,10 +7,10 @@ RUN cargo install wasm-pack bacon --locked
 # Add wasm target
 RUN rustup target add wasm32-unknown-unknown
 
-WORKDIR /app
+WORKDIR /app/backend
 
 # Copy Rust project files
-COPY Cargo.toml Cargo.lock* bacon.toml ./
+COPY backend/Cargo.toml backend/Cargo.lock* backend/bacon.toml ./
 
 CMD ["bacon", "wasm-build", "--headless"]
 

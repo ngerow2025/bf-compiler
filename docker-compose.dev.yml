@@ -5,7 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile.dev.backend
     volumes:
-      - ./src:/app/src
+      - ./backend:/app/backend
+      - ./3rd_party:/app/3rd_party
       - ./web-frontend:/app/web-frontend
 
   frontend:

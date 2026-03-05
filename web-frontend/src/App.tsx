@@ -244,7 +244,8 @@ const useCompiler = (initialSource: string): CompilerState => {
 
     // Initialize WASM once
     useEffect(() => {
-        bf_compiler.init();
+        let message = bf_compiler.init();
+        console.log(message);
     }, []);
 
     // Stage 1: Tokenization - only runs when sourceCode changes

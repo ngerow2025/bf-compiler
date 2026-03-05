@@ -10,11 +10,14 @@ RUN cargo install wasm-pack
 WORKDIR /app
 
 # Copy Rust project files
-COPY Cargo.toml Cargo.lock* ./
-COPY src ./src
+COPY backend/Cargo.toml backend/Cargo.lock* ./backend/
+COPY backend/src ./backend/src
+COPY 3rd_party ./3rd_party
+
+WORKDIR /app/backend
 
 # Build WASM
-RUN wasm-pack build --release --target bundler --out-dir web-frontend/src/wasm --out-name compiler_bf_target
+RUN wasm-pack build --release --target bundler --out-dir ../web-frontend/src/wasm --out-name compiler_bf_target
 
 # -------- Stage 2: Build React app --------
 FROM node:20-alpine AS builder

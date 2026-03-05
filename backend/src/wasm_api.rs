@@ -505,7 +505,9 @@ pub fn compile_to_bf(source: &str) -> Result<String, JsValue> {
     Ok(bf.to_string())
 }
 
+
 #[wasm_bindgen]
-pub fn init() {
+pub fn init() -> JsValue {
     console_error_panic_hook::set_once();
+    JsValue::from_str("WASM module initialized")
 }
