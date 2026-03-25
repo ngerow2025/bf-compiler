@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 body {
-  @apply bg-[#1e1e1e] text-slate-200 overflow-hidden;
+  @apply bg-[#dadada] text-slate-200;
   margin: 0;
 }
 
@@ -49,4 +49,65 @@ body {
 .monaco-highlight-span-inline {
   background-color: rgba(16, 185, 129, 0.4) !important;
   color: #ecfdf5 !important;
+}
+
+.ast-main-card-wrap {
+  position: relative;
+}
+
+.ast-companion-link {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 1.5rem;
+  transform: translateY(-50%);
+  z-index: 0;
+}
+
+.ast-right-companion-link {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 1.5rem;
+  transform: translateY(-50%);
+  z-index: 0;
+}
+
+.ast-main-slot {
+  position: relative;
+  z-index: 1;
+}
+
+.ast-main-vertical-extension {
+  min-height: 0;
+}
+
+.horizontal-arrow {
+  width: 100%;
+  height: 1px;
+}
+
+.container-custom > .child-custom:first-child > .horizontal-arrow {
+  width: 50%;
+  margin-left: 50%;
+} 
+
+.container-custom > .child-custom:last-child > .horizontal-arrow {
+  width: 50%;
+  margin-right: 50%;
+}
+
+.container-custom > .child-custom:only-child > .horizontal-arrow {
+  width: 1px;
+  margin-right: 50%;
+}
+
+.container-custom > .child-custom:not(:last-child) > .horizontal-arrow::after {
+  content: "";
+  position: absolute;
+  top: 0px;
+  left: 100%;
+  width: 1.5rem; /* match the gap */
+  height: 1px;
+  background-color: color-mix(in oklab, var(--color-slate-400) 70%, transparent);
 }

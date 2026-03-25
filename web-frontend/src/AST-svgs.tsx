@@ -1112,7 +1112,7 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
         if (!statementPayload || typeof statementPayload !== "object")
             return null;
 
-        if (statementPayload.VarDecl) {
+        if ("VarDecl" in statementPayload) {
             const varDecl = statementPayload.VarDecl;
             const children: TreeNode[] = [
                 buildAstTypeNode(varDecl.type_),
@@ -1140,7 +1140,7 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
             });
         }
 
-        if (statementPayload.Assignment) {
+        if ("Assignment" in statementPayload) {
             const assignment = statementPayload.Assignment;
             const children: TreeNode[] = [buildVariableIdNode(assignment.var)];
             const exprNode = buildExpressionNode(assignment.value);
@@ -1163,7 +1163,7 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
             });
         }
 
-        if (statementPayload.Expression) {
+        if ("Expression" in statementPayload) {
             const exprStmt = statementPayload.Expression;
             const exprNode = buildExpressionNode(exprStmt.expr);
             const span = getSpanFromAnnotation(exprStmt);
@@ -1272,7 +1272,7 @@ const buildTreeFromAST = (payload: AstProgramPayload | null): TreeNode | null =>
             data: [
                 `name: ${func.name}`,
                 `params: ${func.params?.length ?? 0}`,
-                `variable_name_mapping: ${Object.keys(func.variable_name_mapping ?? {}).length}`,
+                `variable_name_mapping: ${func.variable_name_mapping?.size ?? 0}`,
             ],
             children,
             span,

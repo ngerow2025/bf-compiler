@@ -52,7 +52,10 @@ interface ParsingErrorCollection {
     errors: ParsingErrorPayload[];
 }
 
-type ParsingErrors = ParsingErrorPayload | ParsingErrorCollection | ParsingErrorInfo[];
+type ParsingErrors =
+    | ParsingErrorPayload
+    | ParsingErrorCollection
+    | ParsingErrorInfo[];
 
 interface CompilerState {
     sourceCode: string;
@@ -444,9 +447,12 @@ const TokenStream = ({
                                             color={getTokenColor(token.kind)}
                                             isHighlighted={
                                                 !!hoverSpan &&
-                                                token.span_start >= hoverSpan.offset &&
-                                                token.span_start + token.span_len <=
-                                                    hoverSpan.offset + hoverSpan.length
+                                                token.span_start >=
+                                                    hoverSpan.offset &&
+                                                token.span_start +
+                                                    token.span_len <=
+                                                    hoverSpan.offset +
+                                                        hoverSpan.length
                                             }
                                             onHover={() =>
                                                 onTokenHover({
@@ -477,74 +483,174 @@ interface CompilationOutputProps {
     onNodeHover: (span: HoverSpan | null) => void;
 }
 
+export type SerializedMap = {
+    __type: "Map";
+    value: [unknown, unknown][];
+};
+
+export function mapReplacer(
+    this: unknown,
+    _key: string,
+    value: unknown,
+): unknown {
+    void _key;
+    if (value instanceof Map) {
+        return {
+            __type: "Map",
+            value: Array.from(value.entries()),
+        } satisfies SerializedMap;
+    }
+    return value;
+}
+
+export function mapReviver(
+    this: unknown,
+    _key: string,
+    value: unknown,
+): unknown {
+    void _key;
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "__type" in value &&
+        (value as any).__type === "Map" &&
+        Array.isArray((value as any).value)
+    ) {
+        const v = value as SerializedMap;
+        return new Map(v.value);
+    }
+    return value;
+}
+
+const hashFragment = (seed: number, fragment: string): number => {
+    let hash = seed;
+    for (let i = 0; i < fragment.length; i += 1) {
+        hash ^= fragment.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+};
+
+const variableMappingSize = (
+    mapping: AstFunctionPayload["variable_name_mapping"],
+): number => mapping.size;
+
+const normalizeVariableNameMapping = (
+    mapping: unknown,
+): Map<string | number, string> => {
+    if (mapping instanceof Map) {
+        return mapping as Map<string | number, string>;
+    }
+
+    if (typeof mapping === "object" && mapping !== null) {
+        return new Map<string | number, string>(
+            Object.entries(mapping as Record<string, string>),
+        );
+    }
+
+    return new Map<string | number, string>();
+};
+
+const normalizeAstProgramPayload = (
+    program: AstProgramPayload,
+): AstProgramPayload =>
+    program.map((fn) => ({
+        ...fn,
+        variable_name_mapping: normalizeVariableNameMapping(
+            fn.variable_name_mapping,
+        ),
+    }));
+
+const createAstVisualizationKey = (ast: AstProgramPayload): string => {
+    let hash = 2166136261;
+
+    for (const fn of ast) {
+        hash = hashFragment(
+            hash,
+            `${fn.id}|${fn.name}|${fn.params.length}|${fn.body.statements.length}|${variableMappingSize(fn.variable_name_mapping)}`,
+        );
+    }
+
+    return `ast-${ast.length}-${hash.toString(16)}`;
+};
+
 const CompilationOutput = ({
     compilationSteps,
     isCompiling,
     errors,
     onNodeHover,
-}: CompilationOutputProps) => (
-    <Panel defaultSize={34} minSize={20}>
-        <div className="h-full flex flex-col bg-[#1e1e1e]">
-            <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
-                <Network size={14} /> Compilation Output
-            </div>
-            <div className="flex-1 overflow-auto font-mono text-xs">
-                {errors && (
-                    <div className="text-red-400 text-xs h-full w-full p-4">
-                        <div className="font-bold text-lg mb-1">There are {errors.errors.length} Parsing Errors</div>
-                    </div>
-                )}
-                {isCompiling && !compilationSteps && (
-                    <div className="space-y-2 h-full w-full p-4">
-                        {[...Array(6)].map((_, i) => (
-                            <div
-                                key={i}
-                                className="h-4 bg-white/5 rounded animate-pulse"
-                            />
-                        ))}
-                    </div>
-                )}
-                {compilationSteps && (
-                    <div className="h-full w-full">
-                        <TransformWrapper
-                            limitToBounds={false}
-                            wheel={{
-                                step: 20,
-                                smoothStep: 0.001,
-                                disabled: false,
-                                activationKeys: [],
-                                excluded: [],
-                            }}
-                            pinch={{
-                                step: 1000,
-                                disabled: false,
-                                excluded: [],
-                            }}
-                            panning={{
-                                excluded: [],
-                                disabled: false,
-                                activationKeys: [],
-                            }}
-                            doubleClick={{ excluded: [], step: 0.7 }}
-                            maxScale={5000}
-                            minScale={0.1}
-                        >
-                            <TransformComponent
-                                wrapperStyle={{ width: "100%", height: "100%" }}
-                            >
-                                <ASTTreeVisualization
-                                    payload={compilationSteps.ast}
-                                    onNodeHover={onNodeHover}
-                                    key={JSON.stringify(compilationSteps.ast)}
+}: CompilationOutputProps) => {
+    return (
+        <Panel defaultSize={34} minSize={20}>
+            <div className="h-full flex flex-col bg-[#1e1e1e]">
+                <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border-b border-white/5 text-xs font-medium uppercase text-white/50">
+                    <Network size={14} /> Compilation Output
+                </div>
+                <div className="flex-1 overflow-auto font-mono text-xs">
+                    {errors && (
+                        <div className="text-red-400 text-xs h-full w-full p-4">
+                            <div className="font-bold text-lg mb-1">
+                                There are {errors.errors.length} Parsing Errors
+                            </div>
+                        </div>
+                    )}
+                    {isCompiling && !compilationSteps && (
+                        <div className="space-y-2 h-full w-full p-4">
+                            {[...Array(6)].map((_, i) => (
+                                <div
+                                    key={i}
+                                    className="h-4 bg-white/5 rounded animate-pulse"
                                 />
-                            </TransformComponent>
-                        </TransformWrapper>
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    )}
+                    {compilationSteps && (
+                        <div className="h-full w-full">
+                            <TransformWrapper
+                                limitToBounds={false}
+                                wheel={{
+                                    step: 20,
+                                    smoothStep: 0.001,
+                                    disabled: false,
+                                    activationKeys: [],
+                                    excluded: [],
+                                }}
+                                pinch={{
+                                    step: 1000,
+                                    disabled: false,
+                                    excluded: [],
+                                }}
+                                panning={{
+                                    excluded: [],
+                                    disabled: false,
+                                    activationKeys: [],
+                                }}
+                                doubleClick={{ excluded: [], step: 0.7 }}
+                                maxScale={5000}
+                                minScale={0.1}
+                            >
+                                <TransformComponent
+                                    wrapperStyle={{
+                                        width: "100%",
+                                        height: "100%",
+                                    }}
+                                >
+                                    <ASTTreeVisualization
+                                        payload={compilationSteps.ast}
+                                        onNodeHover={onNodeHover}
+                                        key={createAstVisualizationKey(
+                                            compilationSteps.ast,
+                                        )}
+                                    />
+                                </TransformComponent>
+                            </TransformWrapper>
+                        </div>
+                    )}
+                </div>
             </div>
-        </div>
-    </Panel>
-);
+        </Panel>
+    );
+};
 
 // ============================================================================
 // MAIN COMPONENT
@@ -733,11 +839,12 @@ const CompilerExplorer = () => {
         if (!ast || !tokensArray) return null;
         return {
             tokens: tokensArray,
-            ast: ast.get_all_functions(),
+            ast: normalizeAstProgramPayload(ast.get_all_functions()),
         };
-    }, [ast, tokensArray]) as
-        | { tokens: TokenInfo[]; ast: AstProgramPayload }
-        | null;
+    }, [ast, tokensArray]) as {
+        tokens: TokenInfo[];
+        ast: AstProgramPayload;
+    } | null;
 
     return (
         <div className="h-screen w-screen flex flex-col font-sans">
@@ -844,7 +951,10 @@ export type AstExpressionValue =
 
 export interface AstVarDeclStmt {
     name: string;
-    type_: { kind: string; annotation: SimpleAnnotation };
+    type_: {
+        kind: { Str: number } | string;
+        annotation: SimpleAnnotation;
+    };
     value: AstExpressionValue;
     variable_index: number;
     annotation: SimpleAnnotation;
@@ -863,11 +973,10 @@ export interface AstAssignmentStmt {
 
 export type AstBlockItem =
     | {
-          Statement: {
-              VarDecl?: AstVarDeclStmt;
-              Expression?: AstExpressionStmt;
-              Assignment?: AstAssignmentStmt;
-          };
+          Statement:
+              | { VarDecl: AstVarDeclStmt }
+              | { Expression: AstExpressionStmt }
+              | { Assignment: AstAssignmentStmt };
       }
     | {
           Block: AstBlockBody;
@@ -885,11 +994,11 @@ export interface AstFunctionParam {
 }
 
 export interface AstFunctionPayload {
-    name: QualifiedName;
+    name: string;
     params: AstFunctionParam[];
     body: AstBlockBody;
     id: number;
-    variable_name_mapping: Record<string, number>;
+    variable_name_mapping: Map<string | number, string>;
     annotation: SimpleAnnotation;
 }
 
