@@ -22,7 +22,11 @@ services:
       - "5173:5173"
     volumes:
       - ./web-frontend:/app/web-frontend
+      - frontend_node_modules:/app/web-frontend/node_modules
     depends_on:
       - backend
     environment:
       - CI=true
+
+volumes:
+  frontend_node_modules:

@@ -17,7 +17,7 @@ RUN mkdir -p /app/backend /app/3rd_party /app/web-frontend \
 	&& chown -R appuser:appuser /app
 
 ENV CARGO_HOME=/tmp/cargo
-ENV RUSTUP_HOME=/tmp/rustup
+ENV CARGO_TARGET_DIR=/tmp/target
 
 WORKDIR /app/backend
 

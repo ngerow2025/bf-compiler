@@ -4,7 +4,6 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
-import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import ASTProgram from "./components/ASTProgram";
 
 // ============================================================================
@@ -480,7 +479,6 @@ interface CompilationOutputProps {
     compilationSteps: CompilationSteps | null;
     isCompiling: boolean;
     errors: any;
-    onNodeHover: (span: HoverSpan | null) => void;
 }
 
 export type SerializedMap = {
@@ -522,19 +520,6 @@ export function mapReviver(
     return value;
 }
 
-const hashFragment = (seed: number, fragment: string): number => {
-    let hash = seed;
-    for (let i = 0; i < fragment.length; i += 1) {
-        hash ^= fragment.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
-};
-
-const variableMappingSize = (
-    mapping: AstFunctionPayload["variable_name_mapping"],
-): number => mapping.size;
-
 const normalizeVariableNameMapping = (
     mapping: unknown,
 ): Map<string | number, string> => {
@@ -566,7 +551,6 @@ const CompilationOutput = ({
     compilationSteps,
     isCompiling,
     errors,
-    onNodeHover,
 }: CompilationOutputProps) => {
     return (
         <Panel defaultSize={34} minSize={20}>
@@ -834,7 +818,6 @@ const CompilerExplorer = () => {
                         compilationSteps={compilationSteps}
                         isCompiling={ast === null && parsingErrors === null}
                         errors={parsingErrors}
-                        onNodeHover={setHoverSpan}
                     />
                 </Group>
             </main>
