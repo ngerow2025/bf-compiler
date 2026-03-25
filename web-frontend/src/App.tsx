@@ -4,8 +4,8 @@ import { Code2, Cpu, Network } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as monacoEditor from "monaco-editor";
 import * as bf_compiler from "./wasm/compiler_bf_target.js";
-import { ASTTreeVisualization } from "./AST-svgs.tsx";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
+import ASTProgram from "./components/ASTProgram";
 
 // ============================================================================
 // TYPES
@@ -561,18 +561,6 @@ const normalizeAstProgramPayload = (
         ),
     }));
 
-const createAstVisualizationKey = (ast: AstProgramPayload): string => {
-    let hash = 2166136261;
-
-    for (const fn of ast) {
-        hash = hashFragment(
-            hash,
-            `${fn.id}|${fn.name}|${fn.params.length}|${fn.body.statements.length}|${variableMappingSize(fn.variable_name_mapping)}`,
-        );
-    }
-
-    return `ast-${ast.length}-${hash.toString(16)}`;
-};
 
 const CompilationOutput = ({
     compilationSteps,
@@ -605,45 +593,10 @@ const CompilationOutput = ({
                         </div>
                     )}
                     {compilationSteps && (
-                        <div className="h-full w-full">
-                            <TransformWrapper
-                                limitToBounds={false}
-                                wheel={{
-                                    step: 20,
-                                    smoothStep: 0.001,
-                                    disabled: false,
-                                    activationKeys: [],
-                                    excluded: [],
-                                }}
-                                pinch={{
-                                    step: 1000,
-                                    disabled: false,
-                                    excluded: [],
-                                }}
-                                panning={{
-                                    excluded: [],
-                                    disabled: false,
-                                    activationKeys: [],
-                                }}
-                                doubleClick={{ excluded: [], step: 0.7 }}
-                                maxScale={5000}
-                                minScale={0.1}
-                            >
-                                <TransformComponent
-                                    wrapperStyle={{
-                                        width: "100%",
-                                        height: "100%",
-                                    }}
-                                >
-                                    <ASTTreeVisualization
-                                        payload={compilationSteps.ast}
-                                        onNodeHover={onNodeHover}
-                                        key={createAstVisualizationKey(
-                                            compilationSteps.ast,
-                                        )}
-                                    />
-                                </TransformComponent>
-                            </TransformWrapper>
+                        <div className="h-full w-full overflow-auto">
+                            <ASTProgram
+                                ast={compilationSteps.ast}
+                            />
                         </div>
                     )}
                 </div>
