@@ -536,15 +536,293 @@ const normalizeVariableNameMapping = (
     return new Map<string | number, string>();
 };
 
-const normalizeAstProgramPayload = (
-    program: AstProgramPayload,
-): AstProgramPayload =>
-    program.map((fn) => ({
-        ...fn,
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+    if (typeof value !== "object" || value === null) {
+        return null;
+    }
+    return value as Record<string, unknown>;
+};
+
+const getVariantPayload = (
+    value: unknown,
+    variantNames: string[],
+): unknown | null => {
+    const record = asRecord(value);
+    if (!record) return null;
+
+    for (const variantName of variantNames) {
+        if (variantName in record) {
+            return record[variantName];
+        }
+    }
+
+    return null;
+};
+
+const normalizeTypeKind = (kind: unknown): string | { Str: number } => {
+    if (typeof kind === "string") {
+        return kind;
+    }
+
+    const kindRecord = asRecord(kind);
+    if (!kindRecord) {
+        return "Unknown";
+    }
+
+    if (typeof kindRecord.Str === "number") {
+        return { Str: kindRecord.Str };
+    }
+
+    if (typeof kindRecord.str === "number") {
+        return { Str: kindRecord.str };
+    }
+
+    return "Unknown";
+};
+
+const normalizeAnnotation = (annotation: unknown): SimpleAnnotation => {
+    const annotationRecord = asRecord(annotation);
+    const spanRecord = asRecord(annotationRecord?.span);
+
+    return {
+        span: {
+            offset: Number(spanRecord?.offset ?? 0),
+            length: Number(spanRecord?.length ?? 0),
+        },
+    };
+};
+
+const normalizeExpressionValue = (expr: unknown): AstExpressionValue => {
+    const intLiteral = getVariantPayload(expr, ["IntLiteral", "intLiteral"]);
+    if (intLiteral) {
+        const intRecord = asRecord(intLiteral) ?? {};
+        return {
+            IntLiteral: {
+                value: (asRecord(intRecord.value) ?? {}) as IntLiteralValue,
+                annotation: normalizeAnnotation(intRecord.annotation),
+            },
+        };
+    }
+
+    const stringLiteral = getVariantPayload(expr, [
+        "StringLiteral",
+        "stringLiteral",
+    ]);
+    if (stringLiteral) {
+        const stringRecord = asRecord(stringLiteral) ?? {};
+        return {
+            StringLiteral: {
+                value: String(stringRecord.value ?? ""),
+                annotation: normalizeAnnotation(stringRecord.annotation),
+            },
+        };
+    }
+
+    const variableAccess = getVariantPayload(expr, [
+        "VariableAccess",
+        "variableAccess",
+    ]);
+    if (variableAccess) {
+        const variableRecord = asRecord(variableAccess) ?? {};
+        const accessValue =
+            asRecord(variableRecord.value) ?? asRecord(variableRecord.var) ?? {};
+        return {
+            VariableAccess: {
+                value: {
+                    id: Number(accessValue.id ?? accessValue.index ?? 0),
+                    annotation: normalizeAnnotation(accessValue.annotation),
+                },
+                annotation: normalizeAnnotation(variableRecord.annotation),
+            },
+        };
+    }
+
+    const arrayAccess = getVariantPayload(expr, ["ArrayAccess", "arrayAccess"]);
+    if (arrayAccess) {
+        const arrayRecord = asRecord(arrayAccess) ?? {};
+        const arrayValue = asRecord(arrayRecord.array) ?? {};
+        const indexExpr = arrayRecord.index_expr ?? arrayRecord.indexExpr;
+        return {
+            ArrayAccess: {
+                array: {
+                    id: Number(arrayValue.id ?? arrayValue.index ?? 0),
+                    annotation: normalizeAnnotation(arrayValue.annotation),
+                },
+                index_expr: normalizeExpressionValue(indexExpr),
+                annotation: normalizeAnnotation(arrayRecord.annotation),
+            },
+        };
+    }
+
+    const fnCall = getVariantPayload(expr, ["FnCall", "fnCall", "Call", "call"]);
+    if (fnCall) {
+        const callRecord = asRecord(fnCall) ?? {};
+        const qualifiedName =
+            asRecord(callRecord.qualified_name) ??
+            asRecord(callRecord.qualifiedName) ??
+            {};
+        const parts = Array.isArray(qualifiedName.parts)
+            ? qualifiedName.parts.map((part) => String(part))
+            : [];
+        const args = Array.isArray(callRecord.arguments)
+            ? callRecord.arguments
+            : Array.isArray(callRecord.args)
+              ? callRecord.args
+              : [];
+        return {
+            FnCall: {
+                qualified_name: {
+                    parts,
+                    annotation: normalizeAnnotation(qualifiedName.annotation),
+                },
+                arguments: args.map(normalizeExpressionValue),
+                annotation: normalizeAnnotation(callRecord.annotation),
+            },
+        };
+    }
+
+    // Preserve rendering with a safe fallback instead of crashing the AST panel.
+    return {
+        StringLiteral: {
+            value: "<unknown expression>",
+            annotation: { span: { offset: 0, length: 0 } },
+        },
+    };
+};
+
+const normalizeStatement = (
+    statement: unknown,
+): { VarDecl: AstVarDeclStmt } | { Expression: AstExpressionStmt } | { Assignment: AstAssignmentStmt } => {
+    const varDecl = getVariantPayload(statement, ["VarDecl", "varDecl"]);
+    if (varDecl) {
+        const varDeclRecord = asRecord(varDecl) ?? {};
+        const typeNode = asRecord(varDeclRecord.type_) ?? asRecord(varDeclRecord.type) ?? {};
+        return {
+            VarDecl: {
+                name: String(varDeclRecord.name ?? ""),
+                type_: {
+                    kind: normalizeTypeKind(typeNode.kind),
+                    annotation: normalizeAnnotation(typeNode.annotation),
+                },
+                value: normalizeExpressionValue(varDeclRecord.value),
+                variable_index: Number(
+                    varDeclRecord.variable_index ?? varDeclRecord.variableIndex ?? 0,
+                ),
+                annotation: normalizeAnnotation(varDeclRecord.annotation),
+            },
+        };
+    }
+
+    const expression = getVariantPayload(statement, ["Expression", "expression"]);
+    if (expression) {
+        const expressionRecord = asRecord(expression) ?? {};
+        return {
+            Expression: {
+                expr: normalizeExpressionValue(
+                    expressionRecord.expr ?? expressionRecord.expression,
+                ),
+                annotation: normalizeAnnotation(expressionRecord.annotation),
+            },
+        };
+    }
+
+    const assignment = getVariantPayload(statement, ["Assignment", "assignment"]);
+    if (assignment) {
+        const assignmentRecord = asRecord(assignment) ?? {};
+        return {
+            Assignment: {
+                var: Number(assignmentRecord.var ?? assignmentRecord.variable ?? 0),
+                value: normalizeExpressionValue(assignmentRecord.value),
+                annotation: normalizeAnnotation(assignmentRecord.annotation),
+            },
+        };
+    }
+
+    return {
+        Expression: {
+            expr: {
+                StringLiteral: {
+                    value: "<unknown statement>",
+                    annotation: { span: { offset: 0, length: 0 } },
+                },
+            },
+            annotation: { span: { offset: 0, length: 0 } },
+        },
+    };
+};
+
+const normalizeBlockItem = (item: unknown): AstBlockItem => {
+    const record = asRecord(item) ?? {};
+    if ("Block" in record || "block" in record) {
+        return {
+            Block: normalizeBlockBody(record.Block ?? record.block),
+        };
+    }
+
+    return {
+        Statement: normalizeStatement(record.Statement ?? record.statement),
+    };
+};
+
+const normalizeBlockBody = (block: unknown): AstBlockBody => {
+    const record = asRecord(block) ?? {};
+    const statements =
+        Array.isArray(record.statements) ? record.statements : [];
+
+    return {
+        statements: statements.map(normalizeBlockItem),
+        annotation: normalizeAnnotation(record.annotation),
+    };
+};
+
+const normalizeFunctionPayload = (fn: unknown): AstFunctionPayload => {
+    const record = asRecord(fn) ?? {};
+    const params = Array.isArray(record.params) ? record.params : [];
+
+    return {
+        name: String(record.name ?? "<anonymous>"),
+        params: params.map((param) => {
+            const paramRecord = asRecord(param) ?? {};
+            const typeNode =
+                asRecord(paramRecord.type_) ?? asRecord(paramRecord.type) ?? {};
+            return {
+                type_: {
+                    kind: normalizeTypeKind(typeNode.kind),
+                    annotation: normalizeAnnotation(typeNode.annotation),
+                },
+                variable_index: Number(
+                    paramRecord.variable_index ?? paramRecord.variableIndex ?? 0,
+                ),
+                annotation: normalizeAnnotation(paramRecord.annotation),
+            };
+        }),
+        body: normalizeBlockBody(record.body),
+        id: Number(record.id ?? 0),
         variable_name_mapping: normalizeVariableNameMapping(
-            fn.variable_name_mapping,
+            record.variable_name_mapping ?? record.variableNameMapping,
         ),
-    }));
+        annotation: normalizeAnnotation(record.annotation),
+    };
+};
+
+const normalizeAstProgramPayload = (
+    program: unknown,
+): AstProgramPayload => {
+    if (Array.isArray(program)) {
+        return program.map(normalizeFunctionPayload);
+    }
+
+    const record = asRecord(program);
+    if (!record) {
+        return [];
+    }
+
+    if (Array.isArray(record.functions)) {
+        return record.functions.map(normalizeFunctionPayload);
+    }
+
+    return [];
+};
 
 
 const CompilationOutput = ({
@@ -924,7 +1202,7 @@ export interface AstBlockBody {
 }
 
 export interface AstFunctionParam {
-    type_: { kind: string; annotation: SimpleAnnotation };
+    type_: { kind: string | { Str: number }; annotation: SimpleAnnotation };
     variable_index: number;
     annotation: SimpleAnnotation;
 }

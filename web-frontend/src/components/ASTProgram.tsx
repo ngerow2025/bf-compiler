@@ -8,6 +8,7 @@ import type {
     AstVarDeclStmt,
     IntLiteralValue,
 } from "../App";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import ASTCard from "./ASTCard"
 import { createArrayAccessCard } from "./ast-cards/arrayAccessCard";
 import { createAssignmentStatementCard } from "./ast-cards/assignmentStatementCard";
@@ -35,6 +36,32 @@ interface SubTreeData {
     nodeData: TreeNodeData
     children: SubTreeData[]
 }
+
+interface ReactPinchPanZoomControls {
+    zoomIn: () => void
+    zoomOut: () => void
+    resetTransform: () => void
+}
+
+interface ReactPinchPanZoomProps {
+    children: (controls: ReactPinchPanZoomControls) => any
+}
+
+const ReactPinchPanZoom = ({ children }: ReactPinchPanZoomProps) => (
+    <TransformWrapper
+        initialScale={1}
+        minScale={0.35}
+        maxScale={3}
+        centerOnInit
+        limitToBounds={false}
+        wheel={{ step: 0.12 }}
+        pinch={{ step: 5 }}
+        doubleClick={{ disabled: true }}
+    >
+        {({ zoomIn, zoomOut, resetTransform }: ReactPinchPanZoomControls) =>
+            children({ zoomIn, zoomOut, resetTransform })}
+    </TransformWrapper>
+)
 
 const ConnectorRow = () => (
     <div className="h-14 grid place-items-center">
@@ -230,12 +257,51 @@ const ASTProgram = ({ ast, rootNodeId }: ASTProgramProps) => {
     const treeData = translateAstProgramToTreeData(ast)
 
     return (
-        <div className="w-full overflow-auto py-2">
-            <div className="mx-auto w-max px-8 pb-6">
-                <div id={rootNodeId}>
-                    <SubTree nodeData={treeData.nodeData} bottomChildren={treeData.children} />
-                </div>
-            </div>
+        <div className="h-full w-full py-2">
+            <ReactPinchPanZoom>
+                {({ zoomIn, zoomOut, resetTransform }) => (
+                    <div className="flex h-full w-full flex-col">
+                        <div className="mb-2 flex items-center gap-2 px-3">
+                            <button
+                                type="button"
+                                onClick={() => zoomOut()}
+                                className="rounded border border-slate-600/70 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                            >
+                                -
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => resetTransform()}
+                                className="rounded border border-slate-600/70 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                            >
+                                Reset
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => zoomIn()}
+                                className="rounded border border-slate-600/70 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
+                            >
+                                +
+                            </button>
+                            <span className="text-xs text-slate-400">
+                                Scroll or pinch to zoom, drag to pan
+                            </span>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-hidden">
+                            <TransformComponent
+                                wrapperStyle={{ width: "100%", height: "100%" }}
+                                contentStyle={{ width: "max-content", height: "max-content" }}
+                            >
+                                <div className="mx-auto w-max px-8 pb-6">
+                                    <div id={rootNodeId}>
+                                        <SubTree nodeData={treeData.nodeData} bottomChildren={treeData.children} />
+                                    </div>
+                                </div>
+                            </TransformComponent>
+                        </div>
+                    </div>
+                )}
+            </ReactPinchPanZoom>
         </div>
     )
 }
