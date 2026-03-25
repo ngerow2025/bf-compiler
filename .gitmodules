@@ -1,0 +1,3 @@
+[submodule "3rd_party/miette"]
+	path = 3rd_party/miette
+	url = https://github.com/ngerow2025/miette
