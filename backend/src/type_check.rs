@@ -443,6 +443,12 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 function_name_map,
                 function_signature_map,
             );
+            assert_eq!(
+                typed_index.get_type(),
+                Type::U8, // The lower levels assume that this is always a u8, so we enforce that here
+                "Type mismatch in array index expression, array indices must be of type u8"
+            );
+
             TypedExpression::ArrayAccess {
                 array: array.id,
                 index: Box::new(typed_index),
