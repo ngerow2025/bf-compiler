@@ -135,6 +135,7 @@ pub struct FunctionParam<Annotation: ASTAnnotation> {
     pub type_: ASTTypeNode<Annotation>,
     pub variable_index: VariableId,
     pub annotation: Annotation::FunctionParamAnnotation,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -442,6 +443,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 variable_index: var_index,
                 type_: param_type,
                 annotation: param_annotation,
+                name: param_name,
             });
 
             if self.peek().map(|t| &t.value) == Some(&Token::Comma) {
