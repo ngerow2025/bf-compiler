@@ -13,4 +13,3 @@ repos:
         pass_filenames: false
         language: system
         types: [rust]
-        working_directory: backend
