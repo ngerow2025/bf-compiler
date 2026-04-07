@@ -209,6 +209,10 @@ fn run_expression<T: ASTAnnotation>(
             IntLiteral::I8(x) => Value::I8(*x),
             IntLiteral::U8(x) => Value::U8(*x),
         },
+        Expression::CharLiteral {
+            value,
+            annotation: _,
+        } => Value::U8(*value as u8),
         Expression::StringLiteral {
             value,
             annotation: _,

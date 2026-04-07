@@ -77,6 +77,13 @@ pub struct ConstructStringLiteralAnnotationParams<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConstructCharLiteralAnnotationParams<'a> {
+    pub char_token: &'a Locatable<Token>,
+    pub value: &'a char,
+    pub parsed_value: &'a IntLiteral,
+}
+
+#[derive(Debug, Clone)]
 pub struct ConstructIntLiteralAnnotationParams<'a, Annotation: ASTAnnotation> {
     pub int_token: &'a Locatable<Token>,
     pub int_value: &'a str,
@@ -175,6 +182,10 @@ pub trait ASTAnnotation: Sized + Clone + Debug {
         &mut self,
         params: ConstructStringLiteralAnnotationParams<'_>,
     ) -> Self::ExpressionAnnotation;
+    fn construct_char_literal_annotation(
+        &mut self,
+        params: ConstructCharLiteralAnnotationParams<'_>,
+    ) -> Self::ExpressionAnnotation;
     fn construct_int_literal_annotation(
         &mut self,
         params: ConstructIntLiteralAnnotationParams<'_, Self>,
@@ -270,6 +281,12 @@ impl ASTAnnotation for () {
     fn construct_string_literal_annotation(
         &mut self,
         _params: ConstructStringLiteralAnnotationParams<'_>,
+    ) -> Self::ExpressionAnnotation {
+    }
+
+    fn construct_char_literal_annotation(
+        &mut self,
+        _params: ConstructCharLiteralAnnotationParams<'_>,
     ) -> Self::ExpressionAnnotation {
     }
 

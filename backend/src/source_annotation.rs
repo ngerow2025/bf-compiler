@@ -3,13 +3,14 @@ use serde::Serialize;
 use crate::{
     ast_annotation::{
         ASTAnnotation, ConstructArrayAccessAnnotationParams, ConstructAssignmentAnnotationParams,
-        ConstructBlockAnnotationParams, ConstructExpressionStatementAnnotationParams,
-        ConstructFnCallAnnotationParams, ConstructFunctionAnnotationParams,
-        ConstructFunctionParamAnnotationParams, ConstructIntLiteralAnnotationParams,
-        ConstructProgramAnnotationParams, ConstructQualifiedIdentifierAnnotationParams,
-        ConstructSimpleTypeNodeAnnotationParams, ConstructStrTypeNodeAnnotationParams,
-        ConstructStringLiteralAnnotationParams, ConstructVarDeclAnnotationParams,
-        ConstructVariableAccessAnnotationParams, ConstructVariableAccessExpressionAnnotationParams,
+        ConstructBlockAnnotationParams, ConstructCharLiteralAnnotationParams,
+        ConstructExpressionStatementAnnotationParams, ConstructFnCallAnnotationParams,
+        ConstructFunctionAnnotationParams, ConstructFunctionParamAnnotationParams,
+        ConstructIntLiteralAnnotationParams, ConstructProgramAnnotationParams,
+        ConstructQualifiedIdentifierAnnotationParams, ConstructSimpleTypeNodeAnnotationParams,
+        ConstructStrTypeNodeAnnotationParams, ConstructStringLiteralAnnotationParams,
+        ConstructVarDeclAnnotationParams, ConstructVariableAccessAnnotationParams,
+        ConstructVariableAccessExpressionAnnotationParams,
     },
     parser::{BlockItem, Expression},
     sources::{SourceCodeOrigin, SourceLocation},
@@ -131,6 +132,13 @@ impl ASTAnnotation for SourceAnnotation {
         params.string_token.loc.clone()
     }
 
+    fn construct_char_literal_annotation(
+        &mut self,
+        params: ConstructCharLiteralAnnotationParams<'_>,
+    ) -> Self::ExpressionAnnotation {
+        params.char_token.loc.clone()
+    }
+
     fn construct_int_literal_annotation(
         &mut self,
         params: ConstructIntLiteralAnnotationParams<'_, Self>,
@@ -163,6 +171,7 @@ impl ASTAnnotation for SourceAnnotation {
                     Expression::FnCall { annotation, .. } => annotation,
                     Expression::StringLiteral { annotation, .. } => annotation,
                     Expression::ArrayAccess { annotation, .. } => annotation,
+                    Expression::CharLiteral { annotation, .. } => annotation,
                 }))
                 .chain(params.comma_tokens.iter().map(|comma| &comma.loc))
                 .chain(std::iter::once(&params.right_paren_token.loc)),

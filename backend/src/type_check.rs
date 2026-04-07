@@ -371,6 +371,13 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 IntLiteral::U64(_) => Type::U64,
             },
         },
+        Expression::CharLiteral {
+            value,
+            annotation: _,
+        } => TypedExpression::IntLiteral {
+            int_literal: IntLiteral::U8(value as u8),
+            type_: Type::U8,
+        },
         Expression::StringLiteral {
             value,
             annotation: _,
