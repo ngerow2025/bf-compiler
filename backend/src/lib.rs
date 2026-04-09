@@ -1,6 +1,7 @@
 #![recursion_limit = "10000"]
 pub mod ast_annotation;
 pub mod ast_runner;
+pub mod bump_allocator;
 pub mod codegen;
 pub mod input_grabbing;
 pub mod ir;
