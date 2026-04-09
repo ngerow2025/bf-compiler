@@ -251,7 +251,7 @@ const ASTCard = ({
     return (
         <div
             className={joinClasses(
-                "w-max min-w-70 rounded-xl border px-6 py-5 font-mono shadow-sm",
+                "relative ast-card-root min-w-70 rounded-xl border px-6 py-5 font-mono shadow-sm",
                 surfacePalette.cardBackground,
                 surfacePalette.cardBorder,
                 surfacePalette.baseText,
