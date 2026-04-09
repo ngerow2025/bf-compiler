@@ -449,7 +449,7 @@ pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
 /// Type check the AST
 #[wasm_bindgen]
 pub fn type_check(ast: &WasmAst) -> WasmTypedAst {
-    let typed = type_annotate_program(ast.ast.clone());
+    let typed = type_annotate_program(&ast.ast);
     WasmTypedAst { typed }
 }
 

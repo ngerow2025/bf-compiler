@@ -1,28 +1,24 @@
 use std::collections::HashMap;
 
-use crossterm::{
-    event::{Event, KeyCode, KeyEventKind, read},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
-
 use crate::{
     ast_annotation::ASTAnnotation,
+    input_grabbing::{RawModeGuard, read_single_byte},
     parser::{
         ASTTypeKind, Block, BlockItem, Expression, Function, IntLiteral, Program, Statement,
         VariableId,
     },
 };
 
-struct GlobalContext<T: ASTAnnotation> {
+struct GlobalContext<'a, T: ASTAnnotation> {
     //holds all functions
-    pub functions: Vec<Function<T>>,
+    pub functions: &'a Vec<Function<T>>,
 }
 
-pub fn run_program<T: ASTAnnotation>(program: Program<T>) {
+pub fn run_program<T: ASTAnnotation>(program: &Program<T>) {
     let _raw_mode_guard = RawModeGuard::new();
 
     let global_context = GlobalContext {
-        functions: program.functions,
+        functions: &program.functions,
     };
 
     let main_function = global_context
@@ -32,21 +28,6 @@ pub fn run_program<T: ASTAnnotation>(program: Program<T>) {
         .expect("No main function found");
 
     run_function(main_function, &global_context, vec![]);
-}
-
-struct RawModeGuard;
-
-impl RawModeGuard {
-    fn new() -> Self {
-        enable_raw_mode().expect("failed to enable raw mode");
-        Self
-    }
-}
-
-impl Drop for RawModeGuard {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-    }
 }
 
 #[allow(dead_code)]
@@ -130,7 +111,7 @@ fn run_block<T: ASTAnnotation>(
     for block_item in &block.statements {
         match block_item {
             BlockItem::Block(inner_block) => {
-                run_block(&inner_block, global_context, function_context)
+                run_block(inner_block, global_context, function_context)
             }
             BlockItem::Statement(inner_statement) => {
                 run_statement(inner_statement, global_context, function_context)
@@ -171,7 +152,7 @@ fn run_statement<T: ASTAnnotation>(
             let value = run_expression(value, global_context, function_context);
             let var = function_context
                 .variables
-                .get_mut(&var)
+                .get_mut(var)
                 .expect("expected to be valid variable");
             //ensure that the types match
             assert_eq!(
@@ -286,39 +267,17 @@ fn run_expression<T: ASTAnnotation>(
                     .functions
                     .iter()
                     .find(|f| f.name == qualified_name.full_name())
-                    .expect(&format!(
-                        "Function {} not found",
-                        qualified_name.full_name()
-                    ));
+                    .unwrap_or_else(|| panic!("Function {} not found", qualified_name.full_name()));
 
                 run_function(
                     function,
                     global_context,
                     arguments
-                        .into_iter()
-                        .map(|arg| run_expression(&arg, global_context, function_context))
+                        .iter()
+                        .map(|arg| run_expression(arg, global_context, function_context))
                         .collect(),
                 );
                 Value::None
-            }
-        }
-    }
-}
-
-fn read_single_byte() -> u8 {
-    loop {
-        let event = read().expect("failed to read terminal input event");
-        if let Event::Key(key_event) = event {
-            if key_event.kind != KeyEventKind::Press {
-                continue;
-            }
-
-            match key_event.code {
-                KeyCode::Char(c) => return c as u8,
-                KeyCode::Enter => return b'\n',
-                KeyCode::Tab => return b'\t',
-                KeyCode::Backspace => return 8,
-                _ => continue,
             }
         }
     }
