@@ -50,6 +50,8 @@ pub enum ParsingErrorKind {
     InvalidIntLiteral { message: String },
     #[error("Expected string literal, found {found:?}")]
     ExpectedStringLiteral { found: Token },
+    #[error("Expected character literal, found {found:?}")]
+    ExpectedCharLiteral { found: Token },
     #[error("Expected type token, found {found:?}")]
     ExpectedType { found: Token },
     #[default]
@@ -135,6 +137,7 @@ pub struct FunctionParam<Annotation: ASTAnnotation> {
     pub type_: ASTTypeNode<Annotation>,
     pub variable_index: VariableId,
     pub annotation: Annotation::FunctionParamAnnotation,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -220,6 +223,10 @@ pub enum Expression<Annotation: ASTAnnotation> {
         value: String,
         annotation: Annotation::ExpressionAnnotation,
     },
+    CharLiteral {
+        value: char,
+        annotation: Annotation::ExpressionAnnotation,
+    },
     VariableAccess {
         value: VariableAccess<Annotation>,
         annotation: Annotation::ExpressionAnnotation,
@@ -241,6 +248,7 @@ impl<Annotation: ASTAnnotation> Expression<Annotation> {
         match self {
             Expression::IntLiteral { annotation, .. } => annotation,
             Expression::StringLiteral { annotation, .. } => annotation,
+            Expression::CharLiteral { annotation, .. } => annotation,
             Expression::VariableAccess { annotation, .. } => annotation,
             Expression::ArrayAccess { annotation, .. } => annotation,
             Expression::FnCall { annotation, .. } => annotation,
@@ -442,6 +450,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 variable_index: var_index,
                 type_: param_type,
                 annotation: param_annotation,
+                name: param_name,
             });
 
             if self.peek().map(|t| &t.value) == Some(&Token::Comma) {
@@ -844,6 +853,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                     }
                 }
             }
+            Token::CharLiteral(_) => self.parse_char_literal(),
             _ => Err(ParsingError {
                 src: Self::source_for_token(token),
                 span: token.loc.span,
@@ -1079,6 +1089,41 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         );
         Ok(Expression::StringLiteral {
             value: str_value,
+            annotation,
+        })
+    }
+
+    fn parse_char_literal(&mut self) -> ParseResult<Expression<Annotation>> {
+        let char_token = self.advance().ok_or(ParsingError {
+            src: Self::source_for_token(self.last().unwrap()),
+            span: self.last().unwrap().loc.span,
+            kind: ParsingErrorKind::UnexpectedEOF,
+        })?;
+
+        let char_value = match &char_token.value {
+            Token::CharLiteral(c) => *c,
+            _ => {
+                return Err(ParsingError {
+                    src: Self::source_for_token(&char_token),
+                    span: char_token.loc.span,
+                    kind: ParsingErrorKind::ExpectedCharLiteral {
+                        found: char_token.value.clone(),
+                    },
+                }
+                .into());
+            }
+        };
+
+        let annotation = Annotation::construct_char_literal_annotation(
+            self.annotation_processor,
+            ast_annotation::ConstructCharLiteralAnnotationParams {
+                char_token: &char_token,
+                value: &char_value,
+                parsed_value: &IntLiteral::U8(char_value as u8),
+            },
+        );
+        Ok(Expression::CharLiteral {
+            value: char_value,
             annotation,
         })
     }

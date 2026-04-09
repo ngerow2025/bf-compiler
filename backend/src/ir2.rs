@@ -1,6 +1,7 @@
 //this will work in terms of bytes and distinguish copy/move
 //this will also do register allocation for actual tape layout
 
+use std::ops::Index;
 use std::{collections::HashMap, fmt::Display, vec};
 
 use crate::parser::FunctionId;
@@ -192,6 +193,14 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct PhysicalLocation(pub usize); // offset from stack frame adress
 
+impl<T, const N: usize> Index<PhysicalLocation> for [T; N] {
+    type Output = T;
+
+    fn index(&self, index: PhysicalLocation) -> &Self::Output {
+        &self[index.0]
+    }
+}
+
 struct PhysicalLocationAllocator {
     next_avalible_space: PhysicalLocation,
     registers_in_use: Vec<(PhysicalLocation, usize)>, //location and size
@@ -334,11 +343,13 @@ pub enum Ir2Instruction {
 pub struct Ir2Function {
     pub code: Vec<Ir2Instruction>,
     pub metadata: Ir2FunctionMetadata,
+    pub stack_size: usize,
+    pub id: FunctionId,
 }
 
 #[derive(Debug, Clone)]
 pub struct Ir2FunctionMetadata {
-    parameter_layout: Vec<PhysicalLocation>,
+    pub parameter_layout: Vec<PhysicalLocation>,
     // output_location: PhysicalLocation,
 }
 
@@ -903,6 +914,8 @@ fn lower_ir_function(
     Ir2Function {
         metadata: this_metadata.clone(),
         code: new_code,
+        stack_size: physical_space_allocator.next_avalible_space.0,
+        id: function.id,
     }
 }
 

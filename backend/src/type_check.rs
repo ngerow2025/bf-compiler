@@ -149,7 +149,7 @@ pub struct FunctionSignature {
 }
 
 pub fn type_annotate_program<Annotation: ASTAnnotation>(
-    ast_program: Program<Annotation>,
+    ast_program: &Program<Annotation>,
 ) -> TypedProgram {
     // first collect all the function signatures and create mapping from function name to id
     let mut function_name_map = HashMap::new();
@@ -196,30 +196,35 @@ pub fn type_annotate_program<Annotation: ASTAnnotation>(
         },
     );
 
+    let mut actual_function_name_mapping = HashMap::new();
+    for (name, id) in &function_name_map {
+        actual_function_name_mapping.insert(*id, name.clone());
+    }
+
     TypedProgram {
         functions: ast_program
             .functions
-            .into_iter()
+            .iter()
             .map(|f| type_annotate_function(f, &function_name_map, &function_signature_map))
             .collect(),
-        function_name_mapping: ast_program.function_name_mapping,
+        function_name_mapping: actual_function_name_mapping,
     }
 }
 
 fn type_annotate_function<Annotation: ASTAnnotation>(
-    ast_function: Function<Annotation>,
+    ast_function: &Function<Annotation>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedFunction {
     let mut variable_type_map = HashMap::new();
 
-    for param in &ast_function.params {
+    for param in ast_function.params.iter() {
         variable_type_map.insert(param.variable_index, Type::from(param.type_.kind));
     }
 
     let typed_function_params = ast_function
         .params
-        .into_iter()
+        .iter()
         .map(|p| TypedFunctionParam {
             type_: Type::from(p.type_.kind),
             variable_index: p.variable_index,
@@ -227,7 +232,7 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
         .collect::<Vec<TypedFunctionParam>>();
 
     let typed_body = type_annotate_block(
-        ast_function.body,
+        &ast_function.body,
         &mut variable_type_map,
         function_name_map,
         function_signature_map,
@@ -243,14 +248,14 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
 }
 
 fn type_annotate_block<Annotation: ASTAnnotation>(
-    ast_block: Block<Annotation>,
+    ast_block: &Block<Annotation>,
     variable_type_map: &mut HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedBlock {
     let statements = ast_block
         .statements
-        .into_iter()
+        .iter()
         .map(|item| match item {
             BlockItem::Statement(stmt) => TypedBlockItem::Statement(type_annotate_statement(
                 stmt,
@@ -271,7 +276,7 @@ fn type_annotate_block<Annotation: ASTAnnotation>(
 }
 
 fn type_annotate_statement<Annotation: ASTAnnotation>(
-    ast_stmt: Statement<Annotation>,
+    ast_stmt: &Statement<Annotation>,
     variable_type_map: &mut HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
@@ -291,7 +296,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
                 function_signature_map,
             );
             let var_type = Type::from(type_.kind);
-            variable_type_map.insert(variable_index, var_type);
+            variable_type_map.insert(*variable_index, var_type);
 
             // Type check time
             assert_eq!(
@@ -302,7 +307,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
             );
 
             TypedStatement::VarDecl {
-                var: variable_index,
+                var: *variable_index,
                 type_: var_type,
                 value: typed_value,
             }
@@ -320,7 +325,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
             );
 
             // Type check time
-            let var_type = *variable_type_map.get(&var).expect("Variable not declared");
+            let var_type = *variable_type_map.get(var).expect("Variable not declared");
             assert_eq!(
                 typed_value.get_type(),
                 var_type,
@@ -329,7 +334,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
             );
 
             TypedStatement::Assignment {
-                var,
+                var: *var,
                 value: typed_value,
             }
         }
@@ -349,7 +354,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
 }
 
 fn type_annotate_expression<Annotation: ASTAnnotation>(
-    ast_expr: Expression<Annotation>,
+    ast_expr: &Expression<Annotation>,
     variable_type_map: &HashMap<VariableId, Type>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
@@ -359,8 +364,8 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
             value,
             annotation: _,
         } => TypedExpression::IntLiteral {
-            int_literal: value,
-            type_: match value {
+            int_literal: *value,
+            type_: match *value {
                 IntLiteral::I8(_) => Type::I8,
                 IntLiteral::U8(_) => Type::U8,
                 IntLiteral::I16(_) => Type::I16,
@@ -371,12 +376,19 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 IntLiteral::U64(_) => Type::U64,
             },
         },
+        Expression::CharLiteral {
+            value,
+            annotation: _,
+        } => TypedExpression::IntLiteral {
+            int_literal: IntLiteral::U8(*value as u8),
+            type_: Type::U8,
+        },
         Expression::StringLiteral {
             value,
             annotation: _,
         } => TypedExpression::StringLiteral {
             type_: Type::Str(value.len()),
-            string_literal: value,
+            string_literal: value.clone(),
         },
         Expression::VariableAccess {
             value,
@@ -400,7 +412,7 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 .get(&function_id)
                 .expect("Function signature not found");
             let typed_arguments = arguments
-                .into_iter()
+                .iter()
                 .map(|arg| {
                     type_annotate_expression(
                         arg,
@@ -438,11 +450,17 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
             annotation: _,
         } => {
             let typed_index = type_annotate_expression(
-                *index_expr,
+                index_expr.as_ref(),
                 variable_type_map,
                 function_name_map,
                 function_signature_map,
             );
+            assert_eq!(
+                typed_index.get_type(),
+                Type::U8, // The lower levels assume that this is always a u8, so we enforce that here
+                "Type mismatch in array index expression, array indices must be of type u8"
+            );
+
             TypedExpression::ArrayAccess {
                 array: array.id,
                 index: Box::new(typed_index),
