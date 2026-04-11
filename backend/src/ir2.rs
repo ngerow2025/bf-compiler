@@ -343,7 +343,6 @@ pub enum Ir2Instruction {
 pub struct Ir2Function {
     pub code: Vec<Ir2Instruction>,
     pub metadata: Ir2FunctionMetadata,
-    pub stack_size: usize,
     pub id: FunctionId,
 }
 
@@ -914,7 +913,6 @@ fn lower_ir_function(
     Ir2Function {
         metadata: this_metadata.clone(),
         code: new_code,
-        stack_size: physical_space_allocator.next_avalible_space.0,
         id: function.id,
     }
 }
