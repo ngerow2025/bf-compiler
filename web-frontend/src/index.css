@@ -73,6 +73,12 @@ body {
   z-index: 0;
 }
 
+.ast-card-root {
+  display: block;
+  width: -moz-fit-content;
+  width: fit-content;
+}
+
 .ast-main-slot {
   position: relative;
   z-index: 1;
