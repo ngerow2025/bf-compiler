@@ -3,6 +3,7 @@ use compiler_bf_target::codegen::codegen_program;
 use compiler_bf_target::ir::generate_ir;
 use compiler_bf_target::ir_runner::run_ir;
 use compiler_bf_target::ir2::generate_ir2;
+use compiler_bf_target::ir2_runner::run_ir2;
 use compiler_bf_target::source_annotation::SourceAnnotation;
 use compiler_bf_target::sources::SourceCodeOrigin;
 use compiler_bf_target::type_check::type_annotate_program;
@@ -64,7 +65,7 @@ fn main() -> Result<()> {
 
     if cli.run {
         println!("Running IR... -----------------------");
-        run_ir(&generated_ir, function_name_mapping);
+        run_ir(&generated_ir, function_name_mapping.clone());
         println!("Finished running IR. -----------------------\n");
     }
 
@@ -77,6 +78,12 @@ fn main() -> Result<()> {
     // }
 
     let generated_ir2 = generate_ir2(&generated_ir);
+
+    if cli.run {
+        println!("Running IR2... -----------------------");
+        run_ir2(generated_ir2.values().collect(), function_name_mapping.clone());
+        println!("Finished running IR2. -----------------------\n");
+    }
 
     let generated_bf = BfGenerator::ucodegen_program(generated_ir2);
 
