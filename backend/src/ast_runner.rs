@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{self, Write},
+};
 
 use crate::{
     ast_annotation::ASTAnnotation,
@@ -255,7 +258,10 @@ fn run_expression<T: ASTAnnotation>(
                     "std::out only accepts u8 arguments"
                 );
                 match arg_value {
-                    Value::U8(x) => print!("{}", x as char),
+                    Value::U8(x) => {
+                        print!("{}", x as char);
+                        io::stdout().flush().expect("failed to flush stdout");
+                    }
                     _ => unreachable!(),
                 }
                 Value::None

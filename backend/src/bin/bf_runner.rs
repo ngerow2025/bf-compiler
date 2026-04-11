@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 
 fn main() {
     //take in bf code from an input
@@ -33,7 +33,10 @@ impl BfInterpreter {
                 '<' => self.pointer -= 1,
                 '+' => self.tape[self.pointer] = self.tape[self.pointer].wrapping_add(1),
                 '-' => self.tape[self.pointer] = self.tape[self.pointer].wrapping_sub(1),
-                '.' => print!("{}", self.tape[self.pointer] as char),
+                '.' => {
+                    print!("{}", self.tape[self.pointer] as char);
+                    io::stdout().flush().expect("failed to flush stdout");
+                }
                 ',' => {
                     // For simplicity, we won't implement input in this example
                 }

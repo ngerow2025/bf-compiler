@@ -177,6 +177,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> std::result::Result<String, Le
                 match escaped {
                     'n' => result.push('\n'),
                     't' => result.push('\t'),
+                    'r' => result.push('\r'),
                     '\\' => result.push('\\'),
                     '"' => result.push('"'),
                     '\'' => result.push('\''),
@@ -212,6 +213,7 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> std::result::Result<char, Lexing
                 match escaped {
                     'n' => '\n',
                     't' => '\t',
+                    'r' => '\r',
                     '\\' => '\\',
                     '\'' => '\'',
                     _ => {

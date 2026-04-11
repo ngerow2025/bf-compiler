@@ -8,7 +8,7 @@ fn greet() {
     let name: str<10> = "Alice     ";
     strOut("Hello     ");
     strOut(name);
-    strOut("!\n        ");
+    strOut("!\r\n       ");
 }
 
 fn strOut(s: str<10>) {
@@ -22,6 +22,7 @@ fn strOut(s: str<10>) {
     std::out(s[7u8]);
     std::out(s[8u8]);
     std::out(s[9u8]);
+    std::out('\r');
     std::out('\n');
 }
 

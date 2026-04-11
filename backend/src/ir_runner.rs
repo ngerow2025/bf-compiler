@@ -1,4 +1,8 @@
-use std::{collections::HashMap, vec};
+use std::{
+    collections::HashMap,
+    io::{self, Write},
+    vec,
+};
 
 use crate::{
     bump_allocator::BumpAllocator,
@@ -103,6 +107,7 @@ fn run_function(
                     .get_memory_contents(element)
                     .expect("Failed to get memory contents for output instruction");
                 print!("{}", String::from_utf8_lossy(element_mem.as_slice()));
+                io::stdout().flush().expect("failed to flush stdout");
             }
             IrInstruction::IndirectRead {
                 base,

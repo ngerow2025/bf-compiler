@@ -81,7 +81,10 @@ fn main() -> Result<()> {
 
     if cli.run {
         println!("Running IR2... -----------------------");
-        run_ir2(generated_ir2.values().collect(), function_name_mapping.clone());
+        run_ir2(
+            generated_ir2.values().collect(),
+            function_name_mapping.clone(),
+        );
         println!("Finished running IR2. -----------------------\n");
     }
 

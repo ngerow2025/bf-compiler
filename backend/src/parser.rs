@@ -17,15 +17,6 @@ use crate::tokenizer::{Locatable, Token};
 
 #[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum ParsingErrorKind {
-    // #[error("Invalid escape sequence: \\{0}")]
-    // InvalidEscapeSequence(char),
-    // #[error("Invalid character literal: {0}")]
-    // #[diagnostic(help(
-    //     "Character literals must be a single ASCII character enclosed in single quotes"
-    // ))]
-    // InvalidCharLiteral(char),
-    // #[error("Unexpected character encountered")]
-    // UnexpectedCharacter,
     #[error("Unexpected token: expected {expected:?}, found {found:?}")]
     WrongToken { expected: Token, found: Token },
     #[error("Unexpected end of input")]
