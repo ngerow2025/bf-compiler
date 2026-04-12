@@ -96,11 +96,6 @@ fn run_function(function_id: FunctionId, global_context: &Ir2GlobalContext, mut 
         .find(|f| f.id == function_id)
         .expect("Function ID not found in global context");
 
-    print!(
-        "Running function {}\r\n",
-        global_context.function_name_mapping[&function_id]
-    );
-
     run_instructions(&function.code, global_context, &mut memory);
 }
 
@@ -110,13 +105,6 @@ fn run_instructions(
     memory: &mut TapeView,
 ) {
     for instruction in instructions {
-        print!("Memory state before: ");
-        for i in 0..10 {
-            let value = memory.read(i);
-            print!("[{:>3}]", value);
-        }
-        print!("\r\n");
-        print!("Executing instruction: {:?}\r\n", instruction);
         match instruction {
             Ir2Instruction::BulkMove {
                 target,
@@ -148,11 +136,6 @@ fn run_instructions(
                 function_id,
                 new_stack_frame_base,
             } => {
-                print!("Params: ");
-                for i in 0..10 {
-                    let value = memory.read(new_stack_frame_base.0 + i);
-                    print!("[{:>3}]", value);
-                }
                 run_function(
                     *function_id,
                     global_context,
@@ -311,7 +294,8 @@ fn run_instructions(
                 let start_address = base.0 as usize + (*offset as usize) * (*element_size);
                 for i in 0..*element_size {
                     let value = memory.read(start_address + i);
-                    memory.write(output.0 + i, value);
+                    let prev_value = memory.read(output.0 + i);
+                    memory.write(output.0 + i, value.wrapping_add(prev_value));
                     memory.write(start_address + i, 0);
                 }
             }
