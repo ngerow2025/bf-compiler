@@ -20,6 +20,7 @@ pub struct TypedFunction {
     pub params: Vec<TypedFunctionParam>,
     pub body: TypedBlock,
     pub variable_map: HashMap<VariableId, Type>, // this maps variable ids to their types
+    pub variable_name_mapping: HashMap<VariableId, String>, // this maps variable ids to their original names for better error messages and IR generation
     pub id: FunctionId,
 }
 
@@ -27,6 +28,7 @@ pub struct TypedFunction {
 pub struct TypedFunctionParam {
     pub type_: Type,
     pub variable_index: VariableId,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -228,6 +230,7 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
         .map(|p| TypedFunctionParam {
             type_: Type::from(p.type_.kind),
             variable_index: p.variable_index,
+            name: p.name.clone(),
         })
         .collect::<Vec<TypedFunctionParam>>();
 
@@ -238,11 +241,18 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
         function_signature_map,
     );
 
+    let variable_name_mapping = ast_function
+        .params
+        .iter()
+        .map(|p| (p.variable_index, p.name.clone()))
+        .collect();
+
     // Placeholder implementation
     TypedFunction {
         params: typed_function_params,
         body: typed_body,
         variable_map: variable_type_map,
+        variable_name_mapping,
         id: ast_function.id,
     }
 }

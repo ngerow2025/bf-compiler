@@ -42,11 +42,12 @@ pub struct IrFunction {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct IrRegisterId(usize);
+pub struct IrRegisterId(pub usize);
 
 #[derive(Debug, Clone)]
 pub struct IrRegister {
     pub size: usize,
+    pub description: String,
 }
 
 #[derive(Debug)]
@@ -137,7 +138,7 @@ pub struct RegisterTracker {
 }
 
 pub fn lower_function(function: &TypedFunction) -> (Vec<IrInstruction>, RegisterTracker) {
-    let mut function_lowerer = FunctionLowerer::new();
+    let mut function_lowerer = FunctionLowerer::new(function.variable_name_mapping.clone());
     let code = function_lowerer.lower_function(function);
     (code, function_lowerer.register_tracker())
 }
@@ -156,9 +157,20 @@ impl RegisterTracker {
         }
     }
 
-    pub fn create_register(&mut self, var_id: VariableId, size: usize) -> IrRegisterId {
+    pub fn create_register(
+        &mut self,
+        var_id: VariableId,
+        size: usize,
+        description: &str,
+    ) -> IrRegisterId {
         let new_reg_id = IrRegisterId(self.registers.len());
-        self.registers.insert(new_reg_id, IrRegister { size });
+        self.registers.insert(
+            new_reg_id,
+            IrRegister {
+                size,
+                description: description.to_string(),
+            },
+        );
         self.variable_mapping.insert(var_id, new_reg_id);
         new_reg_id
     }
@@ -171,28 +183,39 @@ impl RegisterTracker {
         self.registers.get(&reg_id)
     }
 
-    pub fn create_intermediate_register(&mut self, size: usize) -> IrRegisterId {
+    pub fn create_intermediate_register(&mut self, size: usize, description: &str) -> IrRegisterId {
         let new_reg_id = IrRegisterId(self.registers.len());
-        self.registers.insert(new_reg_id, IrRegister { size });
+        self.registers.insert(
+            new_reg_id,
+            IrRegister {
+                size,
+                description: description.to_string(),
+            },
+        );
         new_reg_id
     }
 }
 
 struct FunctionLowerer {
     registers: RegisterTracker,
+    variable_names: HashMap<VariableId, String>,
 }
 
 impl FunctionLowerer {
-    fn new() -> Self {
+    fn new(variable_names: HashMap<VariableId, String>) -> Self {
         FunctionLowerer {
             registers: RegisterTracker::new(),
+            variable_names,
         }
     }
 
     fn lower_function(&mut self, function: &TypedFunction) -> Vec<IrInstruction> {
         for param in &function.params {
-            self.registers
-                .create_register(param.variable_index, param.type_.size_in_bytes());
+            self.registers.create_register(
+                param.variable_index,
+                param.type_.size_in_bytes(),
+                &format!("param%{}%", param.name),
+            );
         }
         self.lower_block(&function.body)
     }
@@ -215,7 +238,16 @@ impl FunctionLowerer {
     fn lower_statement(&mut self, stmt: &TypedStatement) -> Vec<IrInstruction> {
         match stmt {
             TypedStatement::VarDecl { var, type_, value } => {
-                let var_register = self.registers.create_register(*var, type_.size_in_bytes());
+                let var_register = self.registers.create_register(
+                    *var,
+                    type_.size_in_bytes(),
+                    &format!(
+                        "var%{}%",
+                        self.variable_names
+                            .get(var)
+                            .unwrap_or(&format!("unnamed_var_{}", var.0))
+                    ),
+                );
 
                 let (expr_reg, mut instructions) = self.lower_expression(value);
 
@@ -246,9 +278,10 @@ impl FunctionLowerer {
     fn lower_expression(&mut self, expr: &TypedExpression) -> (IrRegisterId, Vec<IrInstruction>) {
         match expr {
             TypedExpression::IntLiteral { type_, int_literal } => {
-                let new_reg = self
-                    .registers
-                    .create_intermediate_register(type_.size_in_bytes());
+                let new_reg = self.registers.create_intermediate_register(
+                    type_.size_in_bytes(),
+                    &format!("int_literal_tmp({})", int_literal),
+                );
                 let instructions = vec![IrInstruction::Move {
                     target: new_reg,
                     source: IrMoveOperand::IntLiteral(*int_literal),
@@ -259,9 +292,10 @@ impl FunctionLowerer {
                 type_,
                 string_literal,
             } => {
-                let new_reg = self
-                    .registers
-                    .create_intermediate_register(type_.size_in_bytes());
+                let new_reg = self.registers.create_intermediate_register(
+                    type_.size_in_bytes(),
+                    &format!("string_literal_tmp({})", string_literal),
+                );
                 let instructions = vec![IrInstruction::Move {
                     target: new_reg,
                     source: IrMoveOperand::StringLiteral(string_literal.clone()),
@@ -287,9 +321,10 @@ impl FunctionLowerer {
                     instructions.append(&mut arg_instructions);
                     arg_registers.push(arg_reg);
                 }
-                let output_reg = self
-                    .registers
-                    .create_intermediate_register(type_.size_in_bytes());
+                let output_reg = self.registers.create_intermediate_register(
+                    type_.size_in_bytes(),
+                    &format!("call_output_tmp({})", function),
+                );
                 instructions.push(IrInstruction::Call {
                     function_id: *function,
                     parameters: arg_registers,
@@ -305,9 +340,15 @@ impl FunctionLowerer {
                 let mut instructions = Vec::new();
                 let (index_reg, mut index_instructions) = self.lower_expression(index);
                 instructions.append(&mut index_instructions);
-                let output_reg = self
-                    .registers
-                    .create_intermediate_register(type_.size_in_bytes());
+                let output_reg = self.registers.create_intermediate_register(
+                    type_.size_in_bytes(),
+                    &format!(
+                        "array_access_output_tmp({})",
+                        self.variable_names
+                            .get(array)
+                            .unwrap_or(&format!("unnamed_array_{}", array.0))
+                    ),
+                );
                 let array_reg = self
                     .registers
                     .lookup_register(array)

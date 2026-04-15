@@ -198,6 +198,21 @@ pub enum IntLiteral {
     I64(i64),
 }
 
+impl Display for IntLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntLiteral::U8(v) => write!(f, "{}u8", v),
+            IntLiteral::I8(v) => write!(f, "{}i8", v),
+            IntLiteral::U16(v) => write!(f, "{}u16", v),
+            IntLiteral::I16(v) => write!(f, "{}i16", v),
+            IntLiteral::U32(v) => write!(f, "{}u32", v),
+            IntLiteral::I32(v) => write!(f, "{}i32", v),
+            IntLiteral::U64(v) => write!(f, "{}u64", v),
+            IntLiteral::I64(v) => write!(f, "{}i64", v),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VariableAccess<Annotation: ASTAnnotation> {
     pub id: VariableId,
@@ -248,7 +263,7 @@ impl<Annotation: ASTAnnotation> Expression<Annotation> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct VariableId(usize);
+pub struct VariableId(pub usize);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct QualifiedName<Annotation: ASTAnnotation> {
