@@ -12,16 +12,22 @@ use crate::{
 #[derive(Debug)]
 pub struct TypedProgram {
     pub functions: Vec<TypedFunction>,
-    pub function_name_mapping: HashMap<FunctionId, String>,
+    pub function_name_mapping: HashMap<FunctionId, String>, //this is needed because std::out and std::in don't have actual TypedFunctions
 }
 
 #[derive(Debug)]
 pub struct TypedFunction {
     pub params: Vec<TypedFunctionParam>,
     pub body: TypedBlock,
-    pub variable_map: HashMap<VariableId, Type>, // this maps variable ids to their types
-    pub variable_name_mapping: HashMap<VariableId, String>, // this maps variable ids to their original names for better error messages and IR generation
+    pub variable_info: HashMap<VariableId, VariableInfo>, // combines type and name information
     pub id: FunctionId,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct VariableInfo {
+    pub type_: Type,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -218,10 +224,16 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedFunction {
-    let mut variable_type_map = HashMap::new();
+    let mut variable_info = HashMap::new();
 
     for param in ast_function.params.iter() {
-        variable_type_map.insert(param.variable_index, Type::from(param.type_.kind));
+        variable_info.insert(
+            param.variable_index,
+            VariableInfo {
+                type_: Type::from(param.type_.kind),
+                name: param.name.clone(),
+            },
+        );
     }
 
     let typed_function_params = ast_function
@@ -236,30 +248,24 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
 
     let typed_body = type_annotate_block(
         &ast_function.body,
-        &mut variable_type_map,
+        &mut variable_info,
         function_name_map,
         function_signature_map,
     );
-
-    let variable_name_mapping = ast_function
-        .params
-        .iter()
-        .map(|p| (p.variable_index, p.name.clone()))
-        .collect();
 
     // Placeholder implementation
     TypedFunction {
         params: typed_function_params,
         body: typed_body,
-        variable_map: variable_type_map,
-        variable_name_mapping,
+        variable_info,
         id: ast_function.id,
+        name: ast_function.name.clone(),
     }
 }
 
 fn type_annotate_block<Annotation: ASTAnnotation>(
     ast_block: &Block<Annotation>,
-    variable_type_map: &mut HashMap<VariableId, Type>,
+    variable_info: &mut HashMap<VariableId, VariableInfo>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedBlock {
@@ -269,13 +275,13 @@ fn type_annotate_block<Annotation: ASTAnnotation>(
         .map(|item| match item {
             BlockItem::Statement(stmt) => TypedBlockItem::Statement(type_annotate_statement(
                 stmt,
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             )),
             BlockItem::Block(block) => TypedBlockItem::Block(type_annotate_block(
                 block,
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             )),
@@ -287,7 +293,7 @@ fn type_annotate_block<Annotation: ASTAnnotation>(
 
 fn type_annotate_statement<Annotation: ASTAnnotation>(
     ast_stmt: &Statement<Annotation>,
-    variable_type_map: &mut HashMap<VariableId, Type>,
+    variable_info: &mut HashMap<VariableId, VariableInfo>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedStatement {
@@ -301,12 +307,18 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
         } => {
             let typed_value = type_annotate_expression(
                 value,
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             );
             let var_type = Type::from(type_.kind);
-            variable_type_map.insert(*variable_index, var_type);
+            variable_info.insert(
+                *variable_index,
+                VariableInfo {
+                    type_: var_type,
+                    name: name.clone(),
+                },
+            );
 
             // Type check time
             assert_eq!(
@@ -329,13 +341,14 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
         } => {
             let typed_value = type_annotate_expression(
                 value,
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             );
 
             // Type check time
-            let var_type = *variable_type_map.get(var).expect("Variable not declared");
+            let var_info = variable_info.get(var).expect("Variable not declared");
+            let var_type = var_info.type_;
             assert_eq!(
                 typed_value.get_type(),
                 var_type,
@@ -354,7 +367,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
         } => {
             let typed_expr = type_annotate_expression(
                 expr,
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             );
@@ -365,7 +378,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
 
 fn type_annotate_expression<Annotation: ASTAnnotation>(
     ast_expr: &Expression<Annotation>,
-    variable_type_map: &HashMap<VariableId, Type>,
+    variable_info: &HashMap<VariableId, VariableInfo>,
     function_name_map: &HashMap<String, FunctionId>,
     function_signature_map: &HashMap<FunctionId, FunctionSignature>,
 ) -> TypedExpression {
@@ -404,9 +417,10 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
             value,
             annotation: _,
         } => TypedExpression::Variable {
-            type_: *variable_type_map
+            type_: variable_info
                 .get(&value.id)
-                .expect("Variable not declared"),
+                .expect("Variable not declared")
+                .type_,
             variable: value.id,
         },
         Expression::FnCall {
@@ -426,7 +440,7 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 .map(|arg| {
                     type_annotate_expression(
                         arg,
-                        variable_type_map,
+                        variable_info,
                         function_name_map,
                         function_signature_map,
                     )
@@ -461,7 +475,7 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
         } => {
             let typed_index = type_annotate_expression(
                 index_expr.as_ref(),
-                variable_type_map,
+                variable_info,
                 function_name_map,
                 function_signature_map,
             );

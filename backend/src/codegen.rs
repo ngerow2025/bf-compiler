@@ -1,3 +1,4 @@
+use crate::ir2_memory_representation::PhysicalLocation;
 use crate::parser::FunctionId;
 use crate::ucodegen::{BfUcodeInstruction, Location, LocationId, UCodeProgram};
 use std::collections::HashMap;
@@ -26,7 +27,7 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
             LocationId(0),
             "Function entry point can not be at location 0"
         );
-        let mut current_point_position = 0;
+        let mut current_point_position = PhysicalLocation::new(0);
         for instruction in instructions {
             if let Some(direct_code) =
                 direct_codegen_ucode_instruction(instruction.clone(), &mut current_point_position)
@@ -179,7 +180,7 @@ fn codegen_switch_statement(
 
 fn direct_codegen_ucode_instruction(
     instruction: BfUcodeInstruction,
-    current_point_position: &mut isize,
+    current_point_position: &mut PhysicalLocation,
 ) -> Option<Vec<BfInstruction>> {
     match instruction {
         BfUcodeInstruction::Dec(x) => Some(vec![BfInstruction::Dec; x as usize]),
@@ -217,9 +218,12 @@ fn direct_codegen_ucode_instruction(
     }
 }
 
-fn codegen_move_ptr(current_point_position: &mut isize, location: Location) -> Vec<BfInstruction> {
+fn codegen_move_ptr(
+    current_point_position: &mut PhysicalLocation,
+    location: Location,
+) -> Vec<BfInstruction> {
     match location {
-        Location::Absolute(x) => move_to_absolute(current_point_position, x as isize),
+        Location::Absolute(x) => move_to_absolute(current_point_position, x),
         Location::Relative(x) => {
             if x >= 0 {
                 *current_point_position += x as isize;
@@ -230,21 +234,22 @@ fn codegen_move_ptr(current_point_position: &mut isize, location: Location) -> V
             }
         }
         Location::OffsetAbsolute { offset, base } => {
-            let x = base as isize + offset as isize;
-            move_to_absolute(current_point_position, x)
+            let resolved_target = base + offset;
+            move_to_absolute(current_point_position, resolved_target)
         }
     }
 }
 
-fn move_to_absolute(current_position: &mut isize, target_position: isize) -> Vec<BfInstruction> {
-    if *current_position < target_position {
-        let move_amount = (target_position - *current_position) as usize;
-        *current_position = target_position;
-        vec![BfInstruction::Right; move_amount]
+fn move_to_absolute(
+    current_position: &mut PhysicalLocation,
+    target_position: PhysicalLocation,
+) -> Vec<BfInstruction> {
+    let distance = PhysicalLocation::get_difference(*current_position, target_position);
+    *current_position = target_position;
+    if distance <= 0 {
+        vec![BfInstruction::Left; distance.abs() as usize]
     } else {
-        let move_amount = (*current_position - target_position) as usize;
-        *current_position = target_position;
-        vec![BfInstruction::Left; move_amount]
+        vec![BfInstruction::Right; distance as usize]
     }
 }
 

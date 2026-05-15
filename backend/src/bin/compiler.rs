@@ -63,6 +63,23 @@ fn main() -> Result<()> {
 
     let generated_ir = generate_ir(&type_checked);
 
+    println!("Generated IR:");
+    for ir_function in &generated_ir {
+        println!(
+            "IR for function {}:",
+            function_name_mapping
+                .get(&ir_function.id)
+                .unwrap_or(&format!("Function {}", ir_function.id))
+        );
+        for instruction in &ir_function.code {
+            println!(
+                "  {}",
+                instruction.display_with_reg_desc(&ir_function.registers, &function_name_mapping)
+            );
+        }
+        println!();
+    }
+
     if cli.run {
         println!("Running IR... -----------------------");
         run_ir(&generated_ir, function_name_mapping.clone());

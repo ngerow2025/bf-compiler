@@ -6,9 +6,9 @@ use crate::type_check::*;
 
 #[derive(Debug)]
 pub enum IrInstruction {
-    Move {
+    Copy {
         target: IrRegisterId,
-        source: IrMoveOperand,
+        source: IrCopyOperand,
     },
     IndirectRead {
         base: IrRegisterId,
@@ -38,7 +38,8 @@ pub struct IrFunction {
     pub id: FunctionId,
     pub code: Vec<IrInstruction>,
     pub registers: HashMap<IrRegisterId, IrRegister>,
-    pub parameters: Vec<IrRegisterId>,
+    pub parameters: Vec<IrParameter>,
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -51,10 +52,16 @@ pub struct IrRegister {
 }
 
 #[derive(Debug)]
-pub enum IrMoveOperand {
+pub enum IrCopyOperand {
     Register(IrRegisterId),
     IntLiteral(IntLiteral),
     StringLiteral(String),
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct IrParameter {
+    pub register: IrRegisterId,
+    pub name: String,
 }
 
 pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
@@ -65,10 +72,11 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
             let parameter_registers = func
                 .params
                 .iter()
-                .map(|param| {
-                    register_tracker
+                .map(|param| IrParameter {
+                    register: register_tracker
                         .lookup_register(&param.variable_index)
-                        .unwrap()
+                        .unwrap(),
+                    name: param.name.clone(),
                 })
                 .collect();
             IrFunction {
@@ -76,6 +84,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                 id: func.id,
                 registers: register_tracker.registers,
                 parameters: parameter_registers,
+                name: func.name.clone(),
             }
         })
         .map(
@@ -84,6 +93,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                  parameters,
                  code: old_code,
                  registers: old_registers,
+                 name,
              }| {
                 let mut deleted_registers = vec![];
                 let new_code = old_code
@@ -125,6 +135,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                     parameters,
                     code: new_code,
                     registers: new_registers,
+                    name,
                 }
             },
         )
@@ -138,7 +149,13 @@ pub struct RegisterTracker {
 }
 
 pub fn lower_function(function: &TypedFunction) -> (Vec<IrInstruction>, RegisterTracker) {
-    let mut function_lowerer = FunctionLowerer::new(function.variable_name_mapping.clone());
+    let mut function_lowerer = FunctionLowerer::new(
+        function
+            .variable_info
+            .iter()
+            .map(|(k, v)| (*k, v.name.clone()))
+            .collect(),
+    );
     let code = function_lowerer.lower_function(function);
     (code, function_lowerer.register_tracker())
 }
@@ -168,7 +185,7 @@ impl RegisterTracker {
             new_reg_id,
             IrRegister {
                 size,
-                description: description.to_string(),
+                description: format!("{}#{}", description, new_reg_id.0),
             },
         );
         self.variable_mapping.insert(var_id, new_reg_id);
@@ -189,7 +206,7 @@ impl RegisterTracker {
             new_reg_id,
             IrRegister {
                 size,
-                description: description.to_string(),
+                description: format!("{}#{}", description, new_reg_id.0),
             },
         );
         new_reg_id
@@ -251,9 +268,9 @@ impl FunctionLowerer {
 
                 let (expr_reg, mut instructions) = self.lower_expression(value);
 
-                instructions.push(IrInstruction::Move {
+                instructions.push(IrInstruction::Copy {
                     target: var_register,
-                    source: IrMoveOperand::Register(expr_reg),
+                    source: IrCopyOperand::Register(expr_reg),
                 });
                 instructions
             }
@@ -265,9 +282,9 @@ impl FunctionLowerer {
                     .expect("Undefined variable");
                 let (expr_reg, mut instructions) = self.lower_expression(value);
 
-                instructions.push(IrInstruction::Move {
+                instructions.push(IrInstruction::Copy {
                     target: target_reg,
-                    source: IrMoveOperand::Register(expr_reg),
+                    source: IrCopyOperand::Register(expr_reg),
                 });
                 instructions
             }
@@ -282,9 +299,9 @@ impl FunctionLowerer {
                     type_.size_in_bytes(),
                     &format!("int_literal_tmp({})", int_literal),
                 );
-                let instructions = vec![IrInstruction::Move {
+                let instructions = vec![IrInstruction::Copy {
                     target: new_reg,
-                    source: IrMoveOperand::IntLiteral(*int_literal),
+                    source: IrCopyOperand::IntLiteral(*int_literal),
                 }];
                 (new_reg, instructions)
             }
@@ -294,11 +311,14 @@ impl FunctionLowerer {
             } => {
                 let new_reg = self.registers.create_intermediate_register(
                     type_.size_in_bytes(),
-                    &format!("string_literal_tmp({})", string_literal),
+                    &format!(
+                        "string_literal_tmp({})",
+                        sanatize_string_literal(string_literal)
+                    ),
                 );
-                let instructions = vec![IrInstruction::Move {
+                let instructions = vec![IrInstruction::Copy {
                     target: new_reg,
-                    source: IrMoveOperand::StringLiteral(string_literal.clone()),
+                    source: IrCopyOperand::StringLiteral(string_literal.clone()),
                 }];
                 (new_reg, instructions)
             }
@@ -381,7 +401,7 @@ impl Display for IrFunction {
 impl Display for IrInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IrInstruction::Move { target, source } => {
+            IrInstruction::Copy { target, source } => {
                 write!(f, "MOVE {:?} -> {:?}", source, target)
             }
             IrInstruction::IndirectRead {
@@ -422,6 +442,133 @@ impl Display for IrInstruction {
             }
             IrInstruction::Output { element } => {
                 write!(f, "OUTPUT <- {:?}", element)
+            }
+        }
+    }
+}
+
+fn sanatize_string_literal(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '\n' => "\\n".to_string(),
+            '\r' => "\\r".to_string(),
+            '\t' => "\\t".to_string(),
+            '\"' => "\\\"".to_string(),
+            '\\' => "\\\\".to_string(),
+            c if c.is_control() || !c.is_ascii() => format!("\\x{:02x}", c as u8),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
+impl IrInstruction {
+    pub fn display_with_reg_desc(
+        &self,
+        registers: &HashMap<IrRegisterId, IrRegister>,
+        function_name_map: &HashMap<FunctionId, String>,
+    ) -> String {
+        match self {
+            IrInstruction::Copy { target, source } => {
+                let target_desc = registers
+                    .get(target)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", target));
+                let source_desc = match source {
+                    IrCopyOperand::Register(reg_id) => registers
+                        .get(reg_id)
+                        .map(|r| r.description.clone())
+                        .unwrap_or(format!("{:?}", reg_id)),
+                    IrCopyOperand::IntLiteral(int) => format!("IntLiteral({})", int),
+                    IrCopyOperand::StringLiteral(s) => {
+                        format!("StringLiteral(\"{}\")", sanatize_string_literal(s))
+                    }
+                };
+                format!("MOVE {} -> {}", source_desc, target_desc)
+            }
+            IrInstruction::IndirectRead {
+                base,
+                offset,
+                output,
+            } => {
+                let base_desc = registers
+                    .get(base)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", base));
+                let offset_desc = registers
+                    .get(offset)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", offset));
+                let output_desc = registers
+                    .get(output)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", output));
+                format!(
+                    "INDIRECT_READ base: {}, offset: {} -> {}",
+                    base_desc, offset_desc, output_desc
+                )
+            }
+            IrInstruction::IndirectWrite {
+                base,
+                offset,
+                value,
+            } => {
+                let base_desc = registers
+                    .get(base)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", base));
+                let offset_desc = registers
+                    .get(offset)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", offset));
+                let value_desc = registers
+                    .get(value)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", value));
+                format!(
+                    "INDIRECT_WRITE base: {}, offset: {} <- {}",
+                    base_desc, offset_desc, value_desc
+                )
+            }
+            IrInstruction::Call {
+                function_id,
+                parameters,
+                output,
+            } => {
+                let param_descs: Vec<String> = parameters
+                    .iter()
+                    .map(|reg_id| {
+                        registers
+                            .get(reg_id)
+                            .map(|r| r.description.clone())
+                            .unwrap_or(format!("{:?}", reg_id))
+                    })
+                    .collect();
+                let output_desc = registers
+                    .get(output)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", output));
+                format!(
+                    "CALL {:?}({}) -> {}",
+                    function_name_map
+                        .get(function_id)
+                        .unwrap_or(&format!("Function {}", function_id)),
+                    param_descs.join(", "),
+                    output_desc
+                )
+            }
+            IrInstruction::Input { target } => {
+                let target_desc = registers
+                    .get(target)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", target));
+                format!("INPUT -> {}", target_desc)
+            }
+            IrInstruction::Output { element } => {
+                let element_desc = registers
+                    .get(element)
+                    .map(|r| r.description.clone())
+                    .unwrap_or(format!("{:?}", element));
+                format!("OUTPUT <- {}", element_desc)
             }
         }
     }

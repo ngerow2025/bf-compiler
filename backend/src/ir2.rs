@@ -1,20 +1,20 @@
 //this will work in terms of bytes and distinguish copy/move
 //this will also do register allocation for actual tape layout
 
-use std::ops::Index;
 use std::{collections::HashMap, fmt::Display, vec};
 
+use crate::ir2_memory_representation::{PhysicalLocation, PhysicalLocationAllocator, PhysicalSlot};
 use crate::parser::FunctionId;
 use crate::{
-    ir::{IrFunction, IrInstruction, IrMoveOperand, IrRegisterId},
+    ir::{IrCopyOperand, IrFunction, IrInstruction, IrRegisterId},
     parser::IntLiteral,
 };
 //do instruction level dependency tracking here so that we can reorder instructions to reduce memory usage
 
 fn get_instruction_dependencies(instr: &IrInstruction) -> Vec<IrRegisterId> {
     match instr {
-        IrInstruction::Move { target: _, source } => match source {
-            IrMoveOperand::Register(src_reg) => vec![*src_reg],
+        IrInstruction::Copy { target: _, source } => match source {
+            IrCopyOperand::Register(src_reg) => vec![*src_reg],
             _ => vec![],
         },
         IrInstruction::IndirectRead {
@@ -47,7 +47,7 @@ fn get_instruction_dependencies(instr: &IrInstruction) -> Vec<IrRegisterId> {
 
 fn get_instruction_dependents(instr: &IrInstruction) -> Vec<IrRegisterId> {
     match instr {
-        IrInstruction::Move { target, source: _ } => vec![*target],
+        IrInstruction::Copy { target, source: _ } => vec![*target],
         IrInstruction::IndirectRead {
             base: _,
             offset: _,
@@ -188,127 +188,51 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
 //input: reads a byte from input into the target register, the target register is allowed to be non-zero
 //output: writes a byte from the element register to output
 
-// this represents an actual location in the stack
-// size is implicitly 1 byte
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub struct PhysicalLocation(pub usize); // offset from stack frame adress
-
 struct Ir2Register {
-    location: PhysicalLocation,
-    size: usize,
+    location: PhysicalSlot,
     description: String,
 }
-struct PhysicalLocationAllocator {
-    next_avalible_space: PhysicalLocation,
-    registers_in_use: Vec<(PhysicalLocation, usize)>, //location and size
-}
 
-impl PhysicalLocationAllocator {
-    fn new() -> Self {
-        PhysicalLocationAllocator {
-            next_avalible_space: PhysicalLocation(0),
-            registers_in_use: Vec::new(),
-        }
-    }
-
-    fn allocate(&mut self, size: usize, description: &str) -> PhysicalLocation {
-        let allocated = self.next_avalible_space;
-        self.next_avalible_space = PhysicalLocation(self.next_avalible_space.0 + size);
-        self.registers_in_use.push((allocated, size));
-        allocated
-    }
-
-    fn emit_clear_instructions(&self) -> Vec<Ir2Instruction> {
-        let mut clear_instructions = vec![];
-        for (location, size) in &self.registers_in_use {
-            for offset in 0..*size {
-                clear_instructions.push(Ir2Instruction::Clear {
-                    target: PhysicalLocation(location.0 + offset),
-                });
-            }
-        }
-        clear_instructions
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ir2Instruction {
     Clear {
-        target: PhysicalLocation,
+        target: PhysicalSlot,
     },
     Init {
-        target: PhysicalLocation,
-        value: u8,
+        target: PhysicalSlot,
+        values: Vec<u8>,
     },
     Move {
-        target: PhysicalLocation,
-        source: PhysicalLocation,
+        target: PhysicalSlot,
+        source: PhysicalSlot,
     },
     NMove {
-        targets: Vec<PhysicalLocation>,
-        source: PhysicalLocation,
-    },
-    BulkMove {
-        target: PhysicalLocation,
-        source: PhysicalLocation,
-        size: usize,
-    },
-    BulkNMove {
-        targets: Vec<PhysicalLocation>,
-        source: PhysicalLocation,
-        size: usize,
+        targets: Vec<PhysicalSlot>,
+        source: PhysicalSlot,
     },
     MoveFromIndirect {
         base: PhysicalLocation,
-        offset: PhysicalLocation,
-        output: PhysicalLocation,
+        offset: PhysicalSlot,
+        output: PhysicalSlot,
     },
     MoveFromIndirectConstant {
         base: PhysicalLocation,
         offset: usize,
-        output: PhysicalLocation,
+        output: PhysicalSlot,
     },
     MoveToIndirect {
         base: PhysicalLocation,
-        offset: PhysicalLocation,
-        value: PhysicalLocation,
+        offset: PhysicalSlot,
+        value: PhysicalSlot,
     },
     MoveToIndirectConstant {
         base: PhysicalLocation,
         offset: usize,
-        value: PhysicalLocation,
-    },
-    MoveFromIndirectArray {
-        base: PhysicalLocation,
-        offset: PhysicalLocation,
-        element_size: usize,
-        output: PhysicalLocation,
-    },
-    MoveToIndirectArray {
-        base: PhysicalLocation,
-        offset: PhysicalLocation,
-        element_size: usize,
-        value: PhysicalLocation,
-    },
-    MoveToIndirectArrayConstant {
-        base: PhysicalLocation,
-        offset: usize,
-        element_size: usize,
-        value: PhysicalLocation,
-    },
-    MoveFromIndirectArrayConstant {
-        base: PhysicalLocation,
-        offset: usize,
-        element_size: usize,
-        output: PhysicalLocation,
-    },
-    ClearBulk {
-        target: PhysicalLocation,
-        size: usize,
+        value: PhysicalSlot,
     },
     ClearIndirect {
         base: PhysicalLocation,
-        offset: PhysicalLocation,
+        offset: PhysicalSlot,
     },
     ClearIndirectConstant {
         base: PhysicalLocation,
@@ -316,7 +240,7 @@ pub enum Ir2Instruction {
     },
     ClearIndirectArray {
         base: PhysicalLocation,
-        offset: PhysicalLocation,
+        offset: PhysicalSlot,
         element_size: usize,
     },
     ClearIndirectArrayConstant {
@@ -329,10 +253,10 @@ pub enum Ir2Instruction {
         new_stack_frame_base: PhysicalLocation,
     },
     Input {
-        target: PhysicalLocation,
+        target: PhysicalSlot,
     },
     Output {
-        element: PhysicalLocation,
+        element: PhysicalSlot,
     },
 }
 
@@ -341,12 +265,12 @@ pub struct Ir2Function {
     pub code: Vec<Ir2Instruction>,
     pub metadata: Ir2FunctionMetadata,
     pub id: FunctionId,
-    pub physical_register_mapping: HashMap<IrRegisterId, PhysicalLocation>,
+    pub physical_register_mapping: HashMap<IrRegisterId, PhysicalSlot>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Ir2FunctionMetadata {
-    pub parameter_layout: Vec<PhysicalLocation>,
+    pub parameter_layout: Vec<PhysicalSlot>,
     // output_location: PhysicalLocation,
 }
 
@@ -363,30 +287,22 @@ fn lower_ir_function(
         .get(&function.id)
         .expect("expected valid function metadata");
 
-    for (physical_location, param_register) in this_metadata
+    for (physical_location, param) in this_metadata
         .parameter_layout
         .iter()
         .zip(function.parameters.iter())
     {
-        register_mapping.insert(*param_register, *physical_location);
+        register_mapping.insert(param.register, *physical_location);
     }
 
     //TODO: set the output register location
     // register_mapping.insert(&function.output, this_metadata.output_location);
 
-    //set the next available space to after the parameters
-    if let Some((last_param_index, last_param)) = this_metadata
-        .parameter_layout
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, p)| p.0)
-    {
-        let last_param_size = function
-            .registers
-            .get(&function.parameters[last_param_index])
-            .expect("expected that param had proper register allocated")
-            .size;
-        physical_space_allocator.allocate(last_param.0 + last_param_size, "all parameters");
+    for (idx, slot) in this_metadata.parameter_layout.iter().enumerate() {
+        physical_space_allocator.register_allocation(
+            slot.clone(),
+            format!("param%{}%", function.parameters[idx].name),
+        );
     }
 
     for (register_id, register) in &function.registers {
@@ -395,7 +311,7 @@ fn lower_ir_function(
                 *register_id,
                 physical_space_allocator.allocate(
                     register.size,
-                    format!("from_ir_reg({})", register.description).as_str(),
+                    format!("from_ir_reg({})", register.description),
                 ),
             );
         }
@@ -418,7 +334,10 @@ fn lower_ir_function(
     //emit all the instructions needed to clear all of the used memory locations at the end of the function
     //TODO: be smarter about this
     //TODO: this is where return value handling will go later
-    new_code.extend(physical_space_allocator.emit_clear_instructions());
+
+    for (allocation, _) in physical_space_allocator.get_all_allocations() {
+        new_code.push(Ir2Instruction::Clear { target: allocation });
+    }
 
     Ir2Function {
         metadata: this_metadata.clone(),
@@ -431,184 +350,80 @@ fn lower_ir_function(
 fn convert_instruction(
     function: &IrFunction,
     global_function_metadata: &HashMap<FunctionId, Ir2FunctionMetadata>,
-    physical_space_allocator: &mut PhysicalLocationAllocator,
-    register_mapping: &HashMap<IrRegisterId, PhysicalLocation>,
+    physical_space_allocator: &mut PhysicalLocationAllocator<String>,
+    register_mapping: &HashMap<IrRegisterId, PhysicalSlot>,
     old_instruction: &IrInstruction,
 ) -> Vec<Ir2Instruction> {
     match old_instruction {
-        IrInstruction::Move { target, source } => {
+        IrInstruction::Copy { target, source } => {
             let target_location = register_mapping
                 .get(target)
                 .expect("expected valid mapping");
             match source {
-                IrMoveOperand::IntLiteral(x) => match x {
+                IrCopyOperand::IntLiteral(x) => match x {
                     IntLiteral::U8(val) => {
                         vec![Ir2Instruction::Init {
                             target: *target_location,
-                            value: *val,
+                            values: vec![*val],
                         }]
                     }
                     IntLiteral::I8(val) => {
                         vec![Ir2Instruction::Init {
                             target: *target_location,
-                            value: (*val).to_be_bytes()[0],
+                            values: (*val).to_be_bytes().to_vec(),
                         }]
                     }
                     IntLiteral::U16(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                     IntLiteral::I16(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                     IntLiteral::U32(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 2),
-                                value: raw_bytes[2],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 3),
-                                value: raw_bytes[3],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                     IntLiteral::I32(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 2),
-                                value: raw_bytes[2],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 3),
-                                value: raw_bytes[3],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                     IntLiteral::U64(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 2),
-                                value: raw_bytes[2],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 3),
-                                value: raw_bytes[3],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 4),
-                                value: raw_bytes[4],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 5),
-                                value: raw_bytes[5],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 6),
-                                value: raw_bytes[6],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 7),
-                                value: raw_bytes[7],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                     IntLiteral::I64(val) => {
                         let raw_bytes = val.to_be_bytes();
-                        vec![
-                            Ir2Instruction::Init {
-                                target: *target_location,
-                                value: raw_bytes[0],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 1),
-                                value: raw_bytes[1],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 2),
-                                value: raw_bytes[2],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 3),
-                                value: raw_bytes[3],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 4),
-                                value: raw_bytes[4],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 5),
-                                value: raw_bytes[5],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 6),
-                                value: raw_bytes[6],
-                            },
-                            Ir2Instruction::Init {
-                                target: PhysicalLocation(target_location.0 + 7),
-                                value: raw_bytes[7],
-                            },
-                        ]
+                        vec![Ir2Instruction::Init {
+                            target: *target_location,
+                            values: raw_bytes.to_vec(),
+                        }]
                     }
                 },
-                IrMoveOperand::StringLiteral(val) => {
+                IrCopyOperand::StringLiteral(val) => {
                     let bytes = val.as_bytes();
-                    let mut inits = vec![];
-                    for (i, byte) in bytes.iter().enumerate() {
-                        inits.push(Ir2Instruction::Init {
-                            target: PhysicalLocation(target_location.0 + i),
-                            value: *byte,
-                        });
-                    }
-                    inits
+                    vec![Ir2Instruction::Init {
+                        target: *target_location,
+                        values: bytes.to_vec(),
+                    }]
                 }
-                IrMoveOperand::Register(reg_id) => {
+                IrCopyOperand::Register(reg_id) => {
                     //this is actually considered a copy to be safe, further analysis needs to be done to determine if this can be a move
                     //create a temporary register for the copy operation
                     let reg = register_mapping
@@ -626,38 +441,19 @@ fn convert_instruction(
                             "copy_tmp({} -> {})",
                             function.registers.get(reg_id).unwrap().description,
                             function.registers.get(target).unwrap().description
-                        )
-                        .as_str(),
+                        ),
                     );
 
-                    if reg.0 == 1 {
-                        vec![
-                            Ir2Instruction::Move {
-                                target: copy_tmp,
-                                source: *reg,
-                            },
-                            Ir2Instruction::NMove {
-                                targets: vec![*target_location, *reg],
-                                source: copy_tmp,
-                            },
-                        ]
-                    } else {
-                        vec![
-                            Ir2Instruction::Move {
-                                target: copy_tmp,
-                                source: *reg,
-                            },
-                            Ir2Instruction::BulkNMove {
-                                targets: vec![*target_location, *reg],
-                                source: copy_tmp,
-                                size: function
-                                    .registers
-                                    .get(reg_id)
-                                    .expect("expected valid register")
-                                    .size,
-                            },
-                        ]
-                    }
+                    vec![
+                        Ir2Instruction::Move {
+                            target: copy_tmp,
+                            source: *reg,
+                        },
+                        Ir2Instruction::NMove {
+                            targets: vec![*target_location, *reg],
+                            source: copy_tmp,
+                        },
+                    ]
                 }
             }
         }
@@ -683,80 +479,48 @@ fn convert_instruction(
             let function_metadata = global_function_metadata
                 .get(function_id)
                 .expect("expected valid function metadata");
-            let total_param_size: usize = parameters
+
+            let tmp_param_locations: Vec<PhysicalSlot> = parameters
                 .iter()
-                .map(|param| {
+                .enumerate()
+                .map(|(i, param)| {
                     let reg = function
                         .registers
                         .get(param)
                         .expect("expected that param had proper register allocated");
-                    reg.size
+                    let size = reg.size;
+                    physical_space_allocator
+                        .allocate(size, format!("call_param_copy_tmp(param {})", i))
                 })
-                .sum();
-            let new_stack_frame_base = PhysicalLocation(
-                physical_space_allocator.next_avalible_space.0 + total_param_size + 3,
-            );
+                .collect();
+
+            let new_stack_frame_base = physical_space_allocator.free_space_start() + 3;
+
+            let param_locations: Vec<PhysicalSlot> = function_metadata
+                .parameter_layout
+                .iter()
+                .map(|param_slot| param_slot.clone() + new_stack_frame_base)
+                .collect();
 
             let mut call_setup_code = vec![];
 
             for (i, param) in parameters.iter().enumerate() {
-                let param_reg = function
-                    .registers
-                    .get(param)
-                    .expect("expected that param had proper register allocated");
-                let param_size = param_reg.size;
+
                 let param_physical_location = register_mapping
                     .get(param)
                     .expect("expected valid register mapping");
-                let tmp_move_location = physical_space_allocator.allocate(
-                    param_size,
-                    format!(
-                        "call_param_copy_tmp({} param {})",
-                        function_metadata.parameter_layout[i].0, i
-                    )
-                    .as_str(),
-                );
+
                 //we need to copy the values into the places specified by the function input layout starting at the new stack frame base
-                call_setup_code.extend(match param_size {
-                    1 => {
-                        vec![
-                            Ir2Instruction::Move {
-                                target: tmp_move_location,
-                                source: *param_physical_location,
-                            },
-                            Ir2Instruction::NMove {
-                                targets: vec![
-                                    PhysicalLocation(
-                                        new_stack_frame_base.0
-                                            + function_metadata.parameter_layout[i].0,
-                                    ),
-                                    *param_physical_location,
-                                ],
-                                source: tmp_move_location,
-                            },
-                        ]
-                    }
-                    _ => {
-                        vec![
-                            Ir2Instruction::BulkMove {
-                                target: tmp_move_location,
-                                source: *param_physical_location,
-                                size: param_size,
-                            },
-                            Ir2Instruction::BulkNMove {
-                                targets: vec![
-                                    PhysicalLocation(
-                                        new_stack_frame_base.0
-                                            + function_metadata.parameter_layout[i].0,
-                                    ),
-                                    *param_physical_location,
-                                ],
-                                source: tmp_move_location,
-                                size: param_size,
-                            },
-                        ]
-                    }
-                })
+                call_setup_code.extend(vec![
+                    Ir2Instruction::Move {
+                        target: tmp_param_locations[i],
+                        source: *param_physical_location,
+                    },
+                    Ir2Instruction::NMove {
+                        targets: vec![param_locations[i], *param_physical_location],
+                        source: tmp_param_locations[i],
+                    },
+                ])
             }
 
             let call_instruction = Ir2Instruction::Call {
@@ -801,24 +565,21 @@ fn convert_instruction(
                 format!(
                     "indirect_read_offset_tmp({})",
                     function.registers.get(offset).unwrap().description
-                )
-                .as_str(),
+                ),
             );
             let tmp_output_location_1 = physical_space_allocator.allocate(
                 output_size,
                 format!(
                     "indirect_read_output_tmp1({})",
                     function.registers.get(output).unwrap().description
-                )
-                .as_str(),
+                ),
             );
             let tmp_output_location_2 = physical_space_allocator.allocate(
                 output_size,
                 format!(
                     "indirect_read_output_tmp2({})",
                     function.registers.get(output).unwrap().description
-                )
-                .as_str(),
+                ),
             );
 
             let usage_offset_location = physical_space_allocator.allocate(
@@ -830,18 +591,8 @@ fn convert_instruction(
                 format!(
                     "indirect_read_usage_offset_tmp({})",
                     function.registers.get(offset).unwrap().description
-                )
-                .as_str(),
+                ),
             );
-
-            let output_register = function
-                .registers
-                .get(output)
-                .expect("expected valid register");
-            let offset_register = function
-                .registers
-                .get(offset)
-                .expect("expected valid register");
 
             //move offset -> tmp_offset, usage_offset
             //indirect read base, usage_offset -> tmp_output
@@ -850,28 +601,25 @@ fn convert_instruction(
             //indirect write base, usage_offset, tmp_output_2
 
             vec![
-                Ir2Instruction::BulkNMove {
+                Ir2Instruction::NMove {
                     source: *offset_location,
                     targets: vec![tmp_offset_location, usage_offset_location],
-                    size: offset_register.size,
                 },
                 Ir2Instruction::MoveFromIndirect {
-                    base: *base_location,
+                    base: base_location.get_start(),
                     offset: usage_offset_location,
                     output: tmp_output_location_1,
                 },
-                Ir2Instruction::BulkNMove {
+                Ir2Instruction::NMove {
                     source: tmp_output_location_1,
                     targets: vec![*output_location, tmp_output_location_2],
-                    size: output_register.size,
                 },
-                Ir2Instruction::BulkNMove {
+                Ir2Instruction::NMove {
                     source: tmp_offset_location,
                     targets: vec![*offset_location, usage_offset_location],
-                    size: offset_register.size,
                 },
                 Ir2Instruction::MoveToIndirect {
-                    base: *base_location,
+                    base: base_location.get_start(),
                     offset: usage_offset_location,
                     value: tmp_output_location_2,
                 },
@@ -898,22 +646,13 @@ fn convert_instruction(
                 .get(value)
                 .expect("expected valid register mapping");
 
-            let value_register = function
-                .registers
-                .get(value)
-                .expect("expected valid register");
-            let offset_register = function
-                .registers
-                .get(offset)
-                .expect("expected valid register");
-
             let tmp_offset_location = physical_space_allocator.allocate(
                 function
                     .registers
                     .get(offset)
                     .expect("expected valid register")
                     .size,
-                &format!(
+                format!(
                     "indirect_write_offset_tmp({})",
                     function.registers.get(offset).unwrap().description
                 ),
@@ -924,26 +663,24 @@ fn convert_instruction(
                     .get(offset)
                     .expect("expected valid register")
                     .size,
-                &format!(
+                format!(
                     "indirect_write_usage_offset_tmp({})",
                     function.registers.get(offset).unwrap().description
                 ),
             );
             let tmp_value_location = physical_space_allocator.allocate(
-                value_register.size,
+                value_location.get_size(),
                 format!(
                     "indirect_write_value_tmp({})",
                     function.registers.get(value).unwrap().description
-                )
-                .as_str(),
+                ),
             );
             let usage_value_location = physical_space_allocator.allocate(
-                value_register.size,
+                value_location.get_size(),
                 format!(
                     "indirect_write_usage_value_tmp({})",
                     function.registers.get(value).unwrap().description
-                )
-                .as_str(),
+                ),
             );
 
             //move offset -> tmp_offset, usage_offset
@@ -953,45 +690,35 @@ fn convert_instruction(
             //indirect write base, usage_offset, usage_value
             //move tmp_value -> value
 
-            code_sequence.push(Ir2Instruction::BulkNMove {
+            code_sequence.push(Ir2Instruction::NMove {
                 source: *offset_location,
                 targets: vec![tmp_offset_location, usage_offset_location],
-                size: offset_register.size,
             });
 
             code_sequence.push(Ir2Instruction::ClearIndirect {
-                base: *base_location,
+                base: base_location.get_start(),
                 offset: usage_offset_location,
             });
 
-            code_sequence.push(Ir2Instruction::BulkNMove {
+            code_sequence.push(Ir2Instruction::NMove {
                 source: *value_location,
                 targets: vec![tmp_value_location, usage_value_location],
-                size: value_register.size,
             });
 
-            code_sequence.push(Ir2Instruction::BulkNMove {
+            code_sequence.push(Ir2Instruction::NMove {
                 source: tmp_offset_location,
                 targets: vec![*offset_location, usage_offset_location],
-                size: offset_register.size,
             });
 
             code_sequence.push(Ir2Instruction::MoveToIndirect {
-                base: *base_location,
+                base: base_location.get_start(),
                 offset: usage_offset_location,
                 value: usage_value_location,
             });
 
-            code_sequence.push(match value_register.size {
-                1 => Ir2Instruction::Move {
-                    target: *value_location,
-                    source: tmp_value_location,
-                },
-                _ => Ir2Instruction::BulkMove {
-                    target: *value_location,
-                    source: tmp_value_location,
-                    size: value_register.size,
-                },
+            code_sequence.push(Ir2Instruction::Move {
+                target: *value_location,
+                source: tmp_value_location,
             });
 
             code_sequence
@@ -1003,16 +730,19 @@ pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Fu
     //first generate function metadata for all functions
     let mut global_function_metadata = HashMap::new();
     for function in ir_functions {
-        let mut parameter_layout = vec![];
-        let mut current_offset = 0;
-        for param in &function.parameters {
-            let reg = function
-                .registers
-                .get(param)
-                .expect("expected that param had proper register allocated");
-            parameter_layout.push(PhysicalLocation(current_offset));
-            current_offset += reg.size;
-        }
+        let mut physical_space_allocator = PhysicalLocationAllocator::new();
+
+        let parameter_layout: Vec<PhysicalSlot> = function
+            .parameters
+            .iter()
+            .map(|param| {
+                let reg = function
+                    .registers
+                    .get(&param.register)
+                    .expect("expected that param had proper register allocated");
+                physical_space_allocator.allocate(reg.size, ())
+            })
+            .collect();
         // let output_reg = function
         //     .registers
         //     .get(&function.output)
@@ -1037,20 +767,17 @@ pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Fu
     lowered_functions
 }
 
-impl Display for PhysicalLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "%{}%", self.0)
-    }
-}
-
 impl Display for Ir2Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Ir2Instruction::Clear { target } => {
                 write!(f, "CLEAR [SP + {}]", target)
             }
-            Ir2Instruction::Init { target, value } => {
-                write!(f, "INIT [SP + {}] = {}", target, value)
+            Ir2Instruction::Init {
+                target,
+                values: value,
+            } => {
+                write!(f, "INIT [SP + {}] = {:?}", target, value)
             }
             Ir2Instruction::Move { target, source } => {
                 write!(f, "MOVE [SP + {}] <- [SP + {}]", target, source)
@@ -1059,32 +786,6 @@ impl Display for Ir2Instruction {
                 let target_strs: Vec<String> =
                     targets.iter().map(|t| format!("[SP + {}]", t)).collect();
                 write!(f, "NMOVE {} <- [SP + {}]", target_strs.join(", "), source)
-            }
-            Ir2Instruction::BulkMove {
-                target,
-                source,
-                size,
-            } => {
-                write!(
-                    f,
-                    "BULK_MOVE [SP + {}] <- [SP + {}] SIZE {}",
-                    target, source, size
-                )
-            }
-            Ir2Instruction::BulkNMove {
-                targets,
-                source,
-                size,
-            } => {
-                let target_strs: Vec<String> =
-                    targets.iter().map(|t| format!("[SP + {}]", t)).collect();
-                write!(
-                    f,
-                    "BULK_NMOVE {} <- [SP + {}] SIZE {}",
-                    target_strs.join(", "),
-                    source,
-                    size
-                )
             }
             Ir2Instruction::MoveFromIndirect {
                 base,
@@ -1106,54 +807,6 @@ impl Display for Ir2Instruction {
                     f,
                     "MOVE_FROM_INDIRECT_CONST [SP + {} + {}] -> [SP + {}]",
                     base, offset, output
-                )
-            }
-            Ir2Instruction::MoveFromIndirectArray {
-                base,
-                offset,
-                output,
-                element_size,
-            } => {
-                write!(
-                    f,
-                    "MOVE_FROM_INDIRECT_CONST [SP + {} + {} * {}] -> [SP + {}] size {}",
-                    base, offset, element_size, output, element_size
-                )
-            }
-            Ir2Instruction::MoveFromIndirectArrayConstant {
-                base,
-                offset,
-                output,
-                element_size,
-            } => {
-                write!(
-                    f,
-                    "MOVE_FROM_INDIRECT_ARRAY_CONST [SP + {} + {} * {}] -> [SP + {}] size {}",
-                    base, offset, element_size, output, element_size
-                )
-            }
-            Ir2Instruction::MoveToIndirectArray {
-                base,
-                offset,
-                element_size,
-                value,
-            } => {
-                write!(
-                    f,
-                    "MOVE_TO_INDIRECT_ARRAY [SP + {} + {} * {}] <- [SP + {}] size {}",
-                    base, offset, element_size, value, element_size
-                )
-            }
-            Ir2Instruction::MoveToIndirectArrayConstant {
-                base,
-                offset,
-                element_size,
-                value,
-            } => {
-                write!(
-                    f,
-                    "MOVE_TO_INDIRECT_ARRAY_CONST [SP + {} + {} * {}] <- [SP + {}] size {}",
-                    base, offset, element_size, value, element_size
                 )
             }
             Ir2Instruction::MoveToIndirect {
@@ -1206,9 +859,6 @@ impl Display for Ir2Instruction {
                     base, offset, element_size
                 )
             }
-            Ir2Instruction::ClearBulk { target, size } => {
-                write!(f, "CLEAR_BULK [SP + {}] SIZE {}", target, size)
-            }
             Ir2Instruction::Input { target } => {
                 write!(f, "INPUT [SP + {}]", target)
             }
@@ -1229,36 +879,355 @@ impl Display for Ir2Instruction {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+//TODO: write negitive tests that ensure that asserts trigger when they are supposed to
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ir::IrRegister, util::cartesian_product_iter};
 
-//     #[test]
-//     pub fn test_ir2_move_int_literal() {
-//         let ir_code = vec![IrInstruction::Move {
-//             target: IrRegisterId(0),
-//             source: IrMoveOperand::IntLiteral(IntLiteral::U16(0x1234)),
-//         }];
+    fn test_convert_ir(
+        original_ir: Vec<IrInstruction>,
+        register_mapping: HashMap<IrRegisterId, PhysicalSlot>,
+        registers: HashMap<IrRegisterId, IrRegister>,
+    ) -> Vec<Ir2Instruction> {
+        let mut physical_space_allocator = PhysicalLocationAllocator::new();
 
-//         let ir2_code = ir_code
-//             .iter()
-//             .flat_map(|old_instruction| {
-//                 convert_instruction(
-//                     &IrFunction {
-//                         id: FunctionId(0),
-//                         parameters: vec![],
-//                         output: IrRegisterId(0),
-//                         registers: HashMap::from([(IrRegisterId(0), IrRegister { size: 2 })]),
-//                         code: vec![],
-//                     },
-//                     &HashMap::new(),
-//                     &mut PhysicalLocationAllocator {
-//                         next_avalible_space: PhysicalLocation(0),
-//                     },
-//                     &HashMap::from([(IrRegisterId(0), PhysicalLocation(0))]),
-//                     old_instruction,
-//                 )
-//             })
-//             .collect::<Vec<_>>();
-//     }
-// }
+        for (reg_id, physical_location) in &register_mapping {
+            let reg = registers
+                .get(reg_id)
+                .expect("expected valid register for register mapping");
+            assert_eq!(
+                physical_location.get_size(),
+                reg.size,
+                "Invalid register mapping: physical location size does not match register size for register {}",
+                reg.description
+            );
+            println!(
+                "registering allocation for register {} at physical location {} with size {} and description '{}'",
+                reg_id.0,
+                physical_location.get_start(),
+                reg.size,
+                reg.description
+            );
+            physical_space_allocator
+                .register_allocation(*physical_location, reg.description.clone());
+        }
+
+        //sanity check that all the allocated registers do not overlap in physical space
+        for ((reg_id1, loc1), (reg_id2, loc2)) in
+            cartesian_product_iter(&register_mapping.iter().collect())
+        {
+            let reg1 = registers
+                .get(reg_id1)
+                .expect("expected valid register for register mapping");
+            let reg2 = registers
+                .get(reg_id2)
+                .expect("expected valid register for register mapping");
+
+            assert!(
+                !loc1.intersects(loc2),
+                "physical locations for registers {} and {} overlap",
+                reg1.description,
+                reg2.description
+            );
+        }
+
+        original_ir
+            .iter()
+            .flat_map(|old_instruction| {
+                convert_instruction(
+                    &IrFunction {
+                        id: FunctionId(0),
+                        code: vec![],
+                        registers: registers.clone(),
+                        parameters: vec![],
+                        name: "test_function".to_string(),
+                    },
+                    &HashMap::new(),
+                    &mut physical_space_allocator,
+                    &register_mapping,
+                    old_instruction,
+                )
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn test_tape_output_size(tape: &Vec<u8>, expected_size: usize) {
+        assert!(
+            tape.len() >= expected_size,
+            "Expected tape output size of at least {}, but got {}",
+            expected_size,
+            tape.len()
+        );
+        //if the tape is too long, make sure that the extra is just zeros
+        if tape.len() > expected_size {
+            let extra = &tape[expected_size..];
+            let zero_slice = vec![0; extra.len()];
+            assert_eq!(
+                extra,
+                zero_slice.as_slice(),
+                "Expected extra tape output to be zeros"
+            );
+        }
+    }
+
+    mod init_int_literal {
+        use crate::{
+            ir::{IrCopyOperand, IrInstruction, IrRegister, IrRegisterId},
+            ir2::{
+                Ir2Instruction, PhysicalLocation,
+                tests::{test_convert_ir, test_tape_output_size},
+            },
+            ir2_memory_representation::PhysicalSlot,
+            ir2_runner::test_instructions,
+            parser::IntLiteral,
+        };
+        use maplit::hashmap;
+
+        fn test_ir2_init_int_literal(literal: IntLiteral, bytes: Vec<u8>) {
+            println!("Testing literal {:?} with bytes {:?}", literal, bytes);
+
+            let ir_code = vec![IrInstruction::Copy {
+                target: IrRegisterId(0),
+                source: IrCopyOperand::IntLiteral(literal),
+            }];
+
+            let register_mapping = hashmap! {
+                IrRegisterId(0) => PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
+            };
+            let registers = hashmap! {
+                IrRegisterId(0) => IrRegister {
+                    size: bytes.len(),
+                    description: "target_register".to_string(),
+                },
+            };
+
+            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+
+            let expected_ir2_code = vec![Ir2Instruction::Init {
+                target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
+                values: bytes.clone(),
+            }];
+
+            assert_eq!(ir2_code, expected_ir2_code);
+
+            let start_tape = vec![];
+            let result_tape = test_instructions(ir2_code, start_tape);
+            test_tape_output_size(&result_tape, bytes.len());
+            assert_eq!(result_tape[0..bytes.len()], bytes[..]);
+        }
+
+        #[test]
+        fn u8() {
+            test_ir2_init_int_literal(IntLiteral::U8(42), (42u8).to_be_bytes().to_vec());
+        }
+
+        #[test]
+        fn i8() {
+            test_ir2_init_int_literal(IntLiteral::I8(-73), (-73i8).to_be_bytes().to_vec());
+        }
+
+        #[test]
+        fn u16() {
+            test_ir2_init_int_literal(IntLiteral::U16(0x1122), (0x1122u16).to_be_bytes().to_vec());
+        }
+
+        #[test]
+        fn i16() {
+            test_ir2_init_int_literal(
+                IntLiteral::I16(-0x1234),
+                (-0x1234i16).to_be_bytes().to_vec(),
+            );
+        }
+
+        #[test]
+        fn u32() {
+            test_ir2_init_int_literal(
+                IntLiteral::U32(0x11223344),
+                (0x11223344u32).to_be_bytes().to_vec(),
+            );
+        }
+
+        #[test]
+        fn i32() {
+            test_ir2_init_int_literal(
+                IntLiteral::I32(-0x12345678),
+                (-0x12345678i32).to_be_bytes().to_vec(),
+            );
+        }
+
+        #[test]
+        fn u64() {
+            test_ir2_init_int_literal(
+                IntLiteral::U64(0x1122334455667788),
+                (0x1122334455667788u64).to_be_bytes().to_vec(),
+            );
+        }
+
+        #[test]
+        fn i64() {
+            test_ir2_init_int_literal(
+                IntLiteral::I64(-0x1234567890ABCDEF),
+                (-0x1234567890ABCDEFi64).to_be_bytes().to_vec(),
+            );
+        }
+    }
+
+    mod init_string_literal {
+        use crate::{
+            ir::{IrCopyOperand, IrInstruction, IrRegister, IrRegisterId},
+            ir2::{
+                Ir2Instruction, PhysicalLocation,
+                tests::{test_convert_ir, test_tape_output_size},
+            },
+            ir2_memory_representation::PhysicalSlot,
+            ir2_runner::test_instructions,
+        };
+        use maplit::hashmap;
+
+        fn test_ir2_init_string_literal(literal: &str, bytes: Vec<u8>) {
+            let ir_code = vec![IrInstruction::Copy {
+                target: IrRegisterId(0),
+                source: IrCopyOperand::StringLiteral(literal.to_string()),
+            }];
+
+            let register_mapping = hashmap! {
+                IrRegisterId(0) => PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
+            };
+            let registers = hashmap! {
+                IrRegisterId(0) => IrRegister {
+                    size: bytes.len(),
+                    description: "target_register".to_string(),
+                },
+            };
+
+            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+
+            let expected_ir2_code = vec![Ir2Instruction::Init {
+                target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
+                values: bytes.clone(),
+            }];
+
+            assert_eq!(ir2_code, expected_ir2_code);
+
+            let start_tape = vec![];
+            let result_tape = test_instructions(ir2_code, start_tape);
+            test_tape_output_size(&result_tape, bytes.len());
+            assert_eq!(result_tape[0..bytes.len()], bytes[..]);
+        }
+
+        #[test]
+        fn ascii() {
+            test_ir2_init_string_literal("hello", b"hello".to_vec());
+        }
+
+        #[test]
+        fn zero_length() {
+            test_ir2_init_string_literal("", vec![]);
+        }
+
+        #[test]
+        fn special_characters() {
+            let literal = "line1\nline2\t\\\"'";
+            test_ir2_init_string_literal(literal, literal.as_bytes().to_vec());
+        }
+
+        #[test]
+        fn null_character_only() {
+            let literal = "\0";
+            test_ir2_init_string_literal(literal, vec![0]);
+        }
+
+        #[test]
+        fn embedded_null_character() {
+            let literal = "ab\0cd";
+            test_ir2_init_string_literal(literal, vec![b'a', b'b', 0, b'c', b'd']);
+        }
+    }
+
+    mod reg_reg_move {
+        use maplit::hashmap;
+
+        use crate::{
+            ir::{IrCopyOperand, IrInstruction, IrRegister, IrRegisterId},
+            ir2::{
+                PhysicalLocation,
+                tests::{test_convert_ir, test_tape_output_size},
+            },
+            ir2_memory_representation::PhysicalSlot,
+            ir2_runner::test_instructions,
+        };
+
+        fn test_ir2_reg_reg_move(reg_size: usize, data: Vec<u8>) {
+            assert_eq!(
+                reg_size,
+                data.len(),
+                "test data length must match register size"
+            );
+
+            // IrInstruction::Move { target: IrRegisterId(0), source: IrMoveOperand::Register(IrRegisterId(1)) };
+            let ir_code = vec![IrInstruction::Copy {
+                target: IrRegisterId(1),
+                source: IrCopyOperand::Register(IrRegisterId(0)),
+            }];
+
+            let register_mapping = hashmap! {
+                IrRegisterId(0) => PhysicalSlot::from_start_size(PhysicalLocation::new(0), reg_size),
+                IrRegisterId(1) => PhysicalSlot::from_start_size(PhysicalLocation::new(reg_size), reg_size),
+            };
+
+            let registers = hashmap! {
+                IrRegisterId(0) => IrRegister {
+                    size: reg_size,
+                    description: "source".to_string(),
+                },
+                IrRegisterId(1) => IrRegister {
+                    size: reg_size,
+                    description: "target".to_string(),
+                },
+            };
+
+            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+
+            println!("Generated IR2 code:");
+            for instr in &ir2_code {
+                println!("{}", instr);
+            }
+            println!();
+
+            let mut start_tape = vec![];
+            //set the beggining of the tape to data
+            start_tape.extend(data.clone());
+
+            let result_tape = test_instructions(ir2_code, start_tape);
+
+            test_tape_output_size(&result_tape, reg_size * 2);
+
+            println!("Result tape: {:?}", result_tape);
+
+            //the source should be zeroed out
+            assert_eq!(
+                result_tape[0..reg_size],
+                data[..],
+                "source register should be unchanged"
+            );
+
+            //the target should now contain the data
+            assert_eq!(
+                result_tape[reg_size..reg_size * 2],
+                data[..],
+                "target register should contain the data"
+            );
+        }
+
+        #[test]
+        fn single_byte() {
+            test_ir2_reg_reg_move(1, vec![42]);
+        }
+
+        #[test]
+        fn word() {
+            test_ir2_reg_reg_move(2, vec![0x12, 0x34]);
+        }
+    }
+}

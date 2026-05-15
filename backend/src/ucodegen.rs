@@ -1,7 +1,10 @@
 use crate::ir2::{Ir2Function, Ir2Instruction};
+use crate::ir2_memory_representation::PhysicalLocation;
 use crate::parser::FunctionId;
+use crate::util::transpose;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::iter;
 
 pub struct BfGenerator {
     code: Vec<BfUcodeInstruction>,
@@ -12,9 +15,12 @@ pub struct LocationId(pub usize);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Location {
-    Absolute(usize),
-    Relative(i64),
-    OffsetAbsolute { base: usize, offset: i64 },
+    Absolute(PhysicalLocation),
+    Relative(isize),
+    OffsetAbsolute {
+        base: PhysicalLocation,
+        offset: isize,
+    },
 }
 
 impl Display for Location {
@@ -99,93 +105,92 @@ impl BfGenerator {
         entry_points: &HashMap<&FunctionId, LocationId>,
     ) {
         self.code.extend(match instruction {
-            Ir2Instruction::Clear { target } => {
-                vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
-                    BfUcodeInstruction::Clear,
-                ]
-            }
-            Ir2Instruction::Init { target, value } => {
-                vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
-                    BfUcodeInstruction::Inc(*value),
-                ]
-            }
-            Ir2Instruction::Move { target, source } => {
-                vec![BfUcodeInstruction::MoveData {
-                    from: Location::Absolute(source.0),
-                    to: Location::Absolute(target.0),
-                }]
-            }
-            Ir2Instruction::NMove { targets, source } => {
-                vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(source.0)),
-                    BfUcodeInstruction::Loop(
-                        vec![BfUcodeInstruction::Dec(1)]
-                            .into_iter()
-                            .chain(targets.iter().flat_map(|target| {
-                                vec![
-                                    BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
-                                    BfUcodeInstruction::Inc(1),
-                                ]
-                            }))
-                            .collect(),
-                    ),
-                ]
-            }
-            Ir2Instruction::BulkMove {
-                target,
-                source,
-                size,
-            } => {
-                let distance = target.0 as i64 - source.0 as i64;
-                vec![BfUcodeInstruction::MovePtr(Location::Absolute(source.0))]
-                    .into_iter()
-                    .chain((0..*size).flat_map(|_| {
-                        vec![
-                            BfUcodeInstruction::MoveData {
-                                from: Location::Relative(0),
-                                to: Location::Relative(distance),
-                            },
-                            BfUcodeInstruction::MovePtr(Location::Relative(1)),
+            Ir2Instruction::Clear { target } => target
+                .get_all_locations()
+                .iter()
+                .flat_map(|target| {
+                    [
+                        BfUcodeInstruction::MovePtr(Location::Absolute(*target)),
+                        BfUcodeInstruction::Clear,
+                    ]
+                })
+                .collect(),
+            Ir2Instruction::Init { target, values } => {
+                assert_eq!(
+                    target.get_size(),
+                    values.len(),
+                    "Init instruction target size must match number of values"
+                );
+
+                target
+                    .get_all_locations()
+                    .iter()
+                    .zip(values)
+                    .flat_map(|(target_loc, value)| {
+                        [
+                            BfUcodeInstruction::MovePtr(Location::Absolute(*target_loc)),
+                            BfUcodeInstruction::Inc(*value),
                         ]
-                    }))
+                    })
                     .collect()
             }
-            Ir2Instruction::BulkNMove {
-                size,
-                source,
-                targets,
-            } => {
-                let mut distances = vec![targets[0].0 as i64 - source.0 as i64];
-                distances.extend(
-                    targets
-                        .windows(2)
-                        .map(|window| window[1].0 as i64 - window[0].0 as i64),
+            Ir2Instruction::Move { target, source } => {
+                assert_eq!(
+                    target.get_size(),
+                    source.get_size(),
+                    "Move instruction source and target sizes must match"
                 );
-                let return_distance = source.0 as i64 - targets.last().unwrap().0 as i64;
 
-                vec![BfUcodeInstruction::MovePtr(Location::Absolute(source.0))]
-                    .into_iter()
-                    .chain((0..*size).flat_map(|_| {
+                source
+                    .get_all_locations()
+                    .iter()
+                    .zip(target.get_all_locations().iter())
+                    .map(|(source_loc, target_loc)| BfUcodeInstruction::MoveData {
+                        from: Location::Absolute(*source_loc),
+                        to: Location::Absolute(*target_loc),
+                    })
+                    .collect()
+            }
+            Ir2Instruction::NMove { targets, source } => {
+                for target in targets.iter() {
+                    assert_eq!(
+                        target.get_size(),
+                        source.get_size(),
+                        "NMove instruction source and target sizes must match"
+                    );
+                }
+
+                let targets_loc_groups = transpose(
+                    targets
+                        .iter()
+                        .map(|target| target.get_all_locations())
+                        .collect(),
+                );
+
+                source
+                    .get_all_locations()
+                    .iter()
+                    .zip(targets_loc_groups)
+                    .flat_map(|(source_loc, target_locs)| {
+                        let inc_targets = target_locs.iter().flat_map(|target_loc| {
+                            [
+                                BfUcodeInstruction::MovePtr(Location::Absolute(*target_loc)),
+                                BfUcodeInstruction::Inc(1),
+                            ]
+                        });
+
                         vec![
+                            BfUcodeInstruction::MovePtr(Location::Absolute(*source_loc)),
                             BfUcodeInstruction::Loop(
-                                vec![BfUcodeInstruction::Dec(1)]
-                                    .into_iter()
-                                    .chain(distances.iter().flat_map(|d| {
-                                        vec![
-                                            BfUcodeInstruction::MovePtr(Location::Relative(*d)),
-                                            BfUcodeInstruction::Inc(1),
-                                        ]
-                                    }))
-                                    .chain(vec![BfUcodeInstruction::MovePtr(Location::Relative(
-                                        return_distance,
-                                    ))])
+                                iter::once(BfUcodeInstruction::Dec(1))
+                                    .chain(inc_targets)
+                                    .chain(iter::once(BfUcodeInstruction::MovePtr(
+                                        Location::Absolute(*source_loc),
+                                    )))
                                     .collect(),
                             ),
-                            BfUcodeInstruction::MovePtr(Location::Relative(1)),
                         ]
-                    }))
+                    })
                     .collect()
             }
 
@@ -194,10 +199,21 @@ impl BfGenerator {
                 base: actual_base,
                 offset,
             } => {
-                let base = actual_base.0 + 1; //we only need 3 extra bytes before the actual array start, act like base is shifted by 1
+                assert_eq!(
+                    offset.get_size(),
+                    1,
+                    "MoveFromIndirect offset must be a single cell"
+                );
+                assert_eq!(
+                    output.get_size(),
+                    1,
+                    "Array MoveFromIndirect is not supported yet"
+                );
+
+                let base = *actual_base + 1; //we only need 3 extra bytes before the actual array start, act like base is shifted by 1
                 vec![
                     BfUcodeInstruction::MoveData {
-                        from: Location::Absolute(offset.0),
+                        from: Location::Absolute(offset.get_start()),
                         to: Location::Absolute(base),
                     },
                     BfUcodeInstruction::MovePtr(Location::Absolute(base)),
@@ -243,7 +259,7 @@ impl BfGenerator {
                     ]),
                     BfUcodeInstruction::MoveData {
                         from: Location::OffsetAbsolute { base, offset: 2 },
-                        to: Location::Absolute(output.0),
+                        to: Location::Absolute(output.get_start()),
                     },
                 ]
             }
@@ -253,12 +269,17 @@ impl BfGenerator {
                 offset,
                 output,
             } => {
+                assert!(
+                    output.get_size() == 1,
+                    "Array MoveFromIndirectConstant is not supported yet"
+                );
+
                 vec![BfUcodeInstruction::MoveData {
                     from: Location::OffsetAbsolute {
-                        base: base.0,
-                        offset: *offset as i64 + 4,
+                        base: *base,
+                        offset: *offset as isize + 4,
                     },
-                    to: Location::Absolute(output.0),
+                    to: Location::Absolute(output.get_start()),
                 }]
             }
             //this does assume that there is 4 scratch cells before the actual array
@@ -267,21 +288,32 @@ impl BfGenerator {
                 offset,
                 value,
             } => {
+                assert_eq!(
+                    offset.get_size(),
+                    1,
+                    "MoveToIndirect offset must be a single cell"
+                );
+                assert_eq!(
+                    value.get_size(),
+                    1,
+                    "Array MoveToIndirect is not supported yet"
+                );
+
                 //setup the following cells:
                 //ind -ind val 0 arr...
                 vec![
                     BfUcodeInstruction::MoveData {
-                        from: Location::Absolute(offset.0),
-                        to: Location::Absolute(base.0),
+                        from: Location::Absolute(offset.get_start()),
+                        to: Location::Absolute(*base),
                     },
                     BfUcodeInstruction::MoveData {
-                        from: Location::Absolute(value.0),
+                        from: Location::Absolute(value.get_start()),
                         to: Location::OffsetAbsolute {
-                            base: base.0,
+                            base: *base,
                             offset: 2,
                         },
                     },
-                    BfUcodeInstruction::MovePtr(Location::Absolute(base.0)),
+                    BfUcodeInstruction::MovePtr(Location::Absolute(*base)),
                     BfUcodeInstruction::Loop(vec![
                         BfUcodeInstruction::Dec(1),
                         BfUcodeInstruction::MovePtr(Location::Relative(1)),
@@ -329,29 +361,6 @@ impl BfGenerator {
             Ir2Instruction::MoveToIndirectConstant { .. } => {
                 todo!("Need to actually do MoveToIndirectConstant")
             }
-            Ir2Instruction::MoveFromIndirectArray { .. } => {
-                todo!("Need to actually do MoveFromIndirectArray")
-            }
-            Ir2Instruction::MoveToIndirectArray { .. } => {
-                todo!("Need to actually do MoveToIndirectArray")
-            }
-            Ir2Instruction::MoveToIndirectArrayConstant { .. } => {
-                todo!("Need to actually do MoveToIndirectArrayConstant")
-            }
-            Ir2Instruction::MoveFromIndirectArrayConstant { .. } => {
-                todo!("Need to actually do MoveFromIndirectArrayConstant")
-            }
-            Ir2Instruction::ClearBulk { target, size } => {
-                vec![BfUcodeInstruction::MovePtr(Location::Absolute(target.0))]
-                    .into_iter()
-                    .chain((0..*size).flat_map(|_| {
-                        vec![
-                            BfUcodeInstruction::Loop(vec![BfUcodeInstruction::Dec(1)]),
-                            BfUcodeInstruction::MovePtr(Location::Relative(1)),
-                        ]
-                    }))
-                    .collect()
-            }
             Ir2Instruction::ClearIndirect { .. } => {
                 todo!("Need to actually do ClearIndirect")
             }
@@ -374,7 +383,7 @@ impl BfGenerator {
                 vec![
                     //codegen will set up all of the return addressing and jump handling with its 3 reserved cells right before the new stack frame base
                     //move to the actual new stack frame base
-                    BfUcodeInstruction::MovePtr(Location::Absolute(new_stack_frame_base.0)),
+                    BfUcodeInstruction::MovePtr(Location::Absolute(*new_stack_frame_base)),
                     //jump to function
                     BfUcodeInstruction::JumpLocation {
                         this_location: return_address,
@@ -383,14 +392,24 @@ impl BfGenerator {
                 ]
             }
             Ir2Instruction::Input { target } => {
+                assert_eq!(
+                    target.get_size(),
+                    1,
+                    "Input instruction target must be a single cell"
+                );
                 vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(target.0)),
+                    BfUcodeInstruction::MovePtr(Location::Absolute(target.get_start())),
                     BfUcodeInstruction::Input,
                 ]
             }
             Ir2Instruction::Output { element } => {
+                assert_eq!(
+                    element.get_size(),
+                    1,
+                    "Output instruction element must be a single cell"
+                );
                 vec![
-                    BfUcodeInstruction::MovePtr(Location::Absolute(element.0)),
+                    BfUcodeInstruction::MovePtr(Location::Absolute(element.get_start())),
                     BfUcodeInstruction::Output,
                 ]
             }

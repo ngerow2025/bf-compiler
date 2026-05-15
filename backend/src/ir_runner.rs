@@ -7,7 +7,7 @@ use std::{
 use crate::{
     bump_allocator::BumpAllocator,
     input_grabbing::{RawModeGuard, read_single_byte},
-    ir::{IrFunction, IrInstruction, IrMoveOperand},
+    ir::{IrCopyOperand, IrFunction, IrInstruction},
     parser::{FunctionId, IntLiteral},
 };
 
@@ -60,21 +60,21 @@ fn run_function(
 
     for (i, param) in function.parameters.iter().enumerate() {
         local_variables
-            .set_memory_contents(param, &parameters[i])
+            .set_memory_contents(&param.register, &parameters[i])
             .expect("failed to set parameter memory contents");
     }
 
     for instruction in &function.code {
         match instruction {
-            IrInstruction::Move { target, source } => {
+            IrInstruction::Copy { target, source } => {
                 match source {
-                    IrMoveOperand::Register(source_reg) => {
+                    IrCopyOperand::Register(source_reg) => {
                         //this is basically a memcpy from source_reg to target
                         local_variables
                             .copy(source_reg, target)
                             .expect("Source register not found in local variables");
                     }
-                    IrMoveOperand::IntLiteral(int_literal) => {
+                    IrCopyOperand::IntLiteral(int_literal) => {
                         let raw_information = match int_literal {
                             IntLiteral::I64(i) => i.to_le_bytes().to_vec(),
                             IntLiteral::U64(u) => u.to_le_bytes().to_vec(),
@@ -89,7 +89,7 @@ fn run_function(
                             .set_memory_contents(target, &raw_information)
                             .expect("Failed to set memory contents for integer literal");
                     }
-                    IrMoveOperand::StringLiteral(string_literal) => {
+                    IrCopyOperand::StringLiteral(string_literal) => {
                         local_variables
                             .set_memory_contents(target, string_literal.as_bytes())
                             .expect("Failed to set memory contents for string literal");

@@ -2,3 +2,5 @@
 /backend/target
 /.cargo
 /web-frontend/.pnpm-store
+*.profraw
+*.profdata
