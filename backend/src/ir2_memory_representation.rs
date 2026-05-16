@@ -207,23 +207,32 @@ where
     }
 
     fn find_open_space(&self, size: usize) -> PhysicalSlot {
-        for open_space in &self.open_spaces {
-            match open_space {
-                SpaceInterval::Closed { span } => {
+        //first look for closed intervals that have enough free space to fit this register, prefering smaller intervals to reduce fragmentation
+        let mut canidates = self
+            .open_spaces
+            .iter()
+            .filter_map(|open_space| {
+                #[allow(clippy::collapsible_if)]
+                if let SpaceInterval::Closed { span } = open_space {
                     if span.size >= size {
-                        PhysicalSlot::from_start_size(span.location, size);
+                        return Some(span);
                     }
                 }
-                _ => {}
-            }
+                None
+            })
+            .collect::<Vec<_>>();
+
+        canidates.sort_by_key(|span| span.size);
+        let choice = canidates.first();
+        if let Some(span) = choice {
+            return PhysicalSlot::from_start_size(span.location, size);
         }
-        //find an open interval
+
+        //there was no closed interval that could fit this register
+        //now we have to find an open interval
         for open_space in &self.open_spaces {
-            match open_space {
-                SpaceInterval::Open { start } => {
-                    return PhysicalSlot::from_start_size(*start, size);
-                }
-                _ => {}
+            if let SpaceInterval::Open { start } = open_space {
+                return PhysicalSlot::from_start_size(*start, size);
             }
         }
         panic!("No open space found in infinite tape???");
@@ -382,6 +391,12 @@ where
     }
 }
 
+impl<V: Debug + Clone> Default for PhysicalLocationAllocator<V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Tape {
     pub data: Vec<u8>,
 }
@@ -389,6 +404,12 @@ pub struct Tape {
 impl Tape {
     pub fn new() -> Self {
         Tape { data: vec![] }
+    }
+}
+
+impl Default for Tape {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

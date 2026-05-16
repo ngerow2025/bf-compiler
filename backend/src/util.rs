@@ -1,8 +1,8 @@
-pub fn cartesian_product_iter<T>(items: &Vec<T>) -> impl Iterator<Item = (&T, &T)> {
+pub fn cartesian_product_iter<T>(items: &[T]) -> impl Iterator<Item = (&T, &T)> {
     items
         .iter()
         .enumerate()
-        .flat_map(move |(i, item1)| items.iter().skip(i + 1).map(move |item2| (item1, item2)))
+        .flat_map(|(i, item1)| items[i + 1..].iter().map(move |item2| (item1, item2)))
 }
 
 pub fn transpose<T>(input: Vec<Vec<T>>) -> Vec<Vec<T>> {

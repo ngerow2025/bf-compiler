@@ -225,11 +225,10 @@ fn codegen_move_ptr(
     match location {
         Location::Absolute(x) => move_to_absolute(current_point_position, x),
         Location::Relative(x) => {
+            *current_point_position += x;
             if x >= 0 {
-                *current_point_position += x as isize;
                 vec![BfInstruction::Right; x as usize]
             } else {
-                *current_point_position -= (-x) as isize;
                 vec![BfInstruction::Left; (-x) as usize]
             }
         }
@@ -247,7 +246,7 @@ fn move_to_absolute(
     let distance = PhysicalLocation::get_difference(*current_position, target_position);
     *current_position = target_position;
     if distance <= 0 {
-        vec![BfInstruction::Left; distance.abs() as usize]
+        vec![BfInstruction::Left; distance.unsigned_abs()]
     } else {
         vec![BfInstruction::Right; distance as usize]
     }

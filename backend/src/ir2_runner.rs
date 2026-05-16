@@ -101,7 +101,7 @@ fn run_instructions(
                     "Offset for ClearIndirect must be a single byte"
                 );
                 let resoved_address =
-                    *base + memory.read(*offset.get_all_locations().get(0).unwrap()) as usize;
+                    *base + memory.read(*offset.get_all_locations().first().unwrap()) as usize;
 
                 //it is most likely a bug if the offset location is inside of the array
                 assert_offset_not_in_array_min_span(
@@ -123,7 +123,7 @@ fn run_instructions(
                     "Offset for ClearIndirectArray must be a single byte"
                 );
                 let resolved_address = *base
-                    + memory.read(*offset.get_all_locations().get(0).unwrap()) as usize
+                    + memory.read(*offset.get_all_locations().first().unwrap()) as usize
                         * *element_size;
                 let resolved_slot = PhysicalSlot::from_start_size(resolved_address, *element_size);
 
@@ -140,14 +140,14 @@ fn run_instructions(
                 offset,
                 element_size,
             } => {
-                let resolved_address = *base + (*offset as usize) * (*element_size);
+                let resolved_address = *base + *offset * (*element_size);
                 let resolved_slot = PhysicalSlot::from_start_size(resolved_address, *element_size);
                 for location in resolved_slot.get_all_locations() {
                     memory.write(location, 0);
                 }
             }
             Ir2Instruction::ClearIndirectConstant { base, offset } => {
-                let address = *base + (*offset as usize);
+                let address = *base + *offset;
                 memory.write(address, 0);
             }
             Ir2Instruction::Init { target, values } => {
@@ -187,7 +187,7 @@ fn run_instructions(
                 );
 
                 for (source_loc, target_locs) in
-                    source.get_all_locations().iter().zip(targets.into_iter())
+                    source.get_all_locations().iter().zip(targets)
                 {
                     let value = memory.read(*source_loc);
                     for target_loc in target_locs {
@@ -208,7 +208,7 @@ fn run_instructions(
                     "Offset for MoveFromIndirect must be a single byte"
                 );
                 let resolved_address =
-                    *base + memory.read(*offset.get_all_locations().get(0).unwrap()) as usize;
+                    *base + memory.read(*offset.get_all_locations().first().unwrap()) as usize;
                 let resolved_slot =
                     PhysicalSlot::from_start_size(resolved_address, output.get_size());
 
@@ -267,7 +267,7 @@ fn run_instructions(
                 value,
             } => {
                 let resolved_address =
-                    *base + memory.read(*offset.get_all_locations().get(0).unwrap()) as usize;
+                    *base + memory.read(*offset.get_all_locations().first().unwrap()) as usize;
                 let resolved_slot =
                     PhysicalSlot::from_start_size(resolved_address, value.get_size());
 
@@ -313,10 +313,10 @@ fn run_instructions(
                     "Input instruction target must be a single byte"
                 );
                 let input_byte = read_single_byte();
-                memory.write(*target.get_all_locations().get(0).unwrap(), input_byte);
+                memory.write(*target.get_all_locations().first().unwrap(), input_byte);
             }
             Ir2Instruction::Output { element } => {
-                let output_byte = memory.read(*element.get_all_locations().get(0).unwrap());
+                let output_byte = memory.read(*element.get_all_locations().first().unwrap());
                 print!("{}", output_byte as char);
                 io::stdout().flush().expect("failed to flush stdout");
             }
