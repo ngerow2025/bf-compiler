@@ -163,6 +163,41 @@ pub enum Token {
     CharLiteral(char),
 }
 
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Fn => write!(f, "`fn`"),
+            Token::Let => write!(f, "`let`"),
+            Token::TypeU8 => write!(f, "`u8`"),
+            Token::TypeI8 => write!(f, "`i8`"),
+            Token::TypeU16 => write!(f, "`u16`"),
+            Token::TypeI16 => write!(f, "`i16`"),
+            Token::TypeU32 => write!(f, "`u32`"),
+            Token::TypeI32 => write!(f, "`i32`"),
+            Token::TypeU64 => write!(f, "`u64`"),
+            Token::TypeI64 => write!(f, "`i64`"),
+            Token::TypeStr => write!(f, "`str`"),
+            Token::LBrace => write!(f, "`{{`"),
+            Token::RBrace => write!(f, "`}}`"),
+            Token::LParen => write!(f, "`(`"),
+            Token::RParen => write!(f, "`)`"),
+            Token::LSquare => write!(f, "`[`"),
+            Token::RSquare => write!(f, "`]`"),
+            Token::Colon => write!(f, "`:`"),
+            Token::DoubleColon => write!(f, "`::`"),
+            Token::Semicolon => write!(f, "`;`"),
+            Token::Equals => write!(f, "`=`"),
+            Token::LAngle => write!(f, "`<`"),
+            Token::RAngle => write!(f, "`>`"),
+            Token::Comma => write!(f, "`,`"),
+            Token::Identifier(s) => write!(f, "`{}`", s),
+            Token::IntLiteral(s) => write!(f, "`{}`", s),
+            Token::StringLiteral(s) => write!(f, "`\"{}\"`", s),
+            Token::CharLiteral(c) => write!(f, "`'{}'`", c),
+        }
+    }
+}
+
 fn parse_string(lex: &mut logos::Lexer<Token>) -> std::result::Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();
