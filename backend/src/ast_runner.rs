@@ -1,23 +1,26 @@
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-};
+use std::collections::HashMap;
+
+#[cfg(feature = "advanced-output")]
+use std::io::{self, Write};
 
 use crate::{
     ast_annotation::ASTAnnotation,
-    input_grabbing::{RawModeGuard, read_single_byte},
     parser::{
         ASTTypeKind, Block, BlockItem, Expression, Function, IntLiteral, Program, Statement,
         VariableId,
     },
 };
 
+#[cfg(feature = "advanced-output")]
+use crate::input_grabbing::{RawModeGuard, read_single_byte};
+
 struct GlobalContext<'a, T: ASTAnnotation> {
     //holds all functions
     pub functions: &'a Vec<Function<T>>,
 }
 
-pub fn run_program<T: ASTAnnotation>(program: &Program<T>) {
+#[cfg(feature = "advanced-output")]
+pub fn run_program_console<T: ASTAnnotation>(program: &Program<T>) {
     let _raw_mode_guard = RawModeGuard::new();
 
     let global_context = GlobalContext {
@@ -30,7 +33,57 @@ pub fn run_program<T: ASTAnnotation>(program: &Program<T>) {
         .find(|f| f.name == "main")
         .expect("No main function found");
 
-    run_function(main_function, &global_context, vec![]);
+    let runtime_context = RuntimeContext {
+        global_context: &global_context,
+        input_provider: || Some(read_single_byte()),
+        output_consumer: |b: u8| {
+            print!("{}", b as char);
+            io::stdout().flush().expect("failed to flush stdout");
+        },
+    };
+
+    run_function(main_function, &runtime_context, vec![]);
+}
+
+trait InputProvider: Fn() -> Option<u8> {}
+impl<T: Fn() -> Option<u8>> InputProvider for T {}
+
+trait OutputConsumer: Fn(u8) {}
+impl<T: Fn(u8)> OutputConsumer for T {}
+
+struct RuntimeContext<
+    'a,
+    T: ASTAnnotation,
+    I: InputProvider,
+    O: OutputConsumer,
+> {
+    global_context: &'a GlobalContext<'a, T>,
+    input_provider: I,
+    output_consumer: O,
+}
+
+pub fn run_program<T: ASTAnnotation, InputProvider: Fn() -> Option<u8>, OutputConsumer: Fn(u8)>(
+    program: &Program<T>,
+    input_provider: InputProvider,
+    output_consumer: OutputConsumer,
+) {
+    let global_context = GlobalContext {
+        functions: &program.functions,
+    };
+
+    let main_function = global_context
+        .functions
+        .iter()
+        .find(|f| f.name == "main")
+        .expect("No main function found");
+
+    let runtime_context = RuntimeContext {
+        global_context: &global_context,
+        input_provider,
+        output_consumer,
+    };
+
+    run_function(main_function, &runtime_context, vec![]);
 }
 
 #[allow(dead_code)]
@@ -85,9 +138,9 @@ impl FunctionContext {
     }
 }
 
-fn run_function<T: ASTAnnotation>(
+fn run_function<T: ASTAnnotation, I: InputProvider, O: OutputConsumer>(
     function: &Function<T>,
-    global_context: &GlobalContext<T>,
+    runtime_context: &RuntimeContext<T, I, O>,
     arguments: Vec<Value>,
 ) {
     let mut function_context = FunctionContext::new();
@@ -103,29 +156,29 @@ fn run_function<T: ASTAnnotation>(
         );
     }
 
-    run_block(&function.body, global_context, &mut function_context);
+    run_block(&function.body, runtime_context, &mut function_context);
 }
 
-fn run_block<T: ASTAnnotation>(
+fn run_block<T: ASTAnnotation, I: InputProvider, O: OutputConsumer>(
     block: &Block<T>,
-    global_context: &GlobalContext<T>,
+    runtime_context: &RuntimeContext<T, I, O>,
     function_context: &mut FunctionContext,
 ) {
     for block_item in &block.statements {
         match block_item {
             BlockItem::Block(inner_block) => {
-                run_block(inner_block, global_context, function_context)
+                run_block(inner_block, runtime_context, function_context)
             }
             BlockItem::Statement(inner_statement) => {
-                run_statement(inner_statement, global_context, function_context)
+                run_statement(inner_statement, runtime_context, function_context)
             }
         }
     }
 }
 
-fn run_statement<T: ASTAnnotation>(
+fn run_statement<T: ASTAnnotation, I: InputProvider, O: OutputConsumer>(
     statement: &Statement<T>,
-    global_context: &GlobalContext<T>,
+    runtime_context: &RuntimeContext<T, I, O>,
     function_context: &mut FunctionContext,
 ) {
     match statement {
@@ -136,7 +189,7 @@ fn run_statement<T: ASTAnnotation>(
             variable_index,
             annotation: _,
         } => {
-            let value = run_expression(value, global_context, function_context);
+            let value = run_expression(value, runtime_context, function_context);
             function_context.variables.insert(
                 *variable_index,
                 VariableInfo {
@@ -152,7 +205,7 @@ fn run_statement<T: ASTAnnotation>(
             value,
             annotation: _,
         } => {
-            let value = run_expression(value, global_context, function_context);
+            let value = run_expression(value, runtime_context, function_context);
             let var = function_context
                 .variables
                 .get_mut(var)
@@ -169,14 +222,14 @@ fn run_statement<T: ASTAnnotation>(
             expr,
             annotation: _,
         } => {
-            run_expression(expr, global_context, function_context);
+            run_expression(expr, runtime_context, function_context);
         }
     }
 }
 
-fn run_expression<T: ASTAnnotation>(
+fn run_expression<T: ASTAnnotation, I: InputProvider, O: OutputConsumer>(
     expr: &Expression<T>,
-    global_context: &GlobalContext<T>,
+    runtime_context: &RuntimeContext<T, I, O>,
     function_context: &mut FunctionContext,
 ) -> Value {
     match expr {
@@ -216,7 +269,7 @@ fn run_expression<T: ASTAnnotation>(
             index_expr,
             annotation: _,
         } => {
-            let index_value = run_expression(index_expr, global_context, function_context);
+            let index_value = run_expression(index_expr, runtime_context, function_context);
             let array_value = function_context
                 .variables
                 .get(&array.id)
@@ -251,7 +304,7 @@ fn run_expression<T: ASTAnnotation>(
         } => {
             if qualified_name.full_name() == "std::out" {
                 assert_eq!(arguments.len(), 1, "std::out expects exactly one argument");
-                let arg_value = run_expression(&arguments[0], global_context, function_context);
+                let arg_value = run_expression(&arguments[0], runtime_context, function_context);
                 assert_eq!(
                     arg_value.get_type(),
                     Some(ASTTypeKind::U8),
@@ -259,17 +312,18 @@ fn run_expression<T: ASTAnnotation>(
                 );
                 match arg_value {
                     Value::U8(x) => {
-                        print!("{}", x as char);
-                        io::stdout().flush().expect("failed to flush stdout");
+                        (runtime_context.output_consumer)(x);
                     }
                     _ => unreachable!(),
                 }
                 Value::None
             } else if qualified_name.full_name() == "std::in" {
                 assert!(arguments.is_empty(), "std::in expects no arguments");
-                Value::U8(read_single_byte())
+                let input_byte = (runtime_context.input_provider)().unwrap_or(0);
+                Value::U8(input_byte)
             } else {
-                let function = global_context
+                let function = runtime_context
+                    .global_context
                     .functions
                     .iter()
                     .find(|f| f.name == qualified_name.full_name())
@@ -277,10 +331,10 @@ fn run_expression<T: ASTAnnotation>(
 
                 run_function(
                     function,
-                    global_context,
+                    runtime_context,
                     arguments
                         .iter()
-                        .map(|arg| run_expression(arg, global_context, function_context))
+                        .map(|arg| run_expression(arg, runtime_context, function_context))
                         .collect(),
                 );
                 Value::None

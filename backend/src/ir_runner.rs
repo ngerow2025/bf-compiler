@@ -1,15 +1,16 @@
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-    vec,
-};
+use std::{collections::HashMap, vec};
+
+#[cfg(feature = "advanced-output")]
+use std::io::{self, Write};
 
 use crate::{
     bump_allocator::BumpAllocator,
-    input_grabbing::{RawModeGuard, read_single_byte},
     ir::{IrCopyOperand, IrFunction, IrInstruction},
     parser::{FunctionId, IntLiteral},
 };
+
+#[cfg(feature = "advanced-output")]
+use crate::input_grabbing::{RawModeGuard, read_single_byte};
 
 struct IrGlobalContext<'a> {
     //holds all functions
@@ -17,7 +18,24 @@ struct IrGlobalContext<'a> {
     pub function_name_mapping: HashMap<FunctionId, String>,
 }
 
-pub fn run_ir(ir_functions: &Vec<IrFunction>, function_name_mapping: HashMap<FunctionId, String>) {
+trait InputProvider: Fn() -> Option<u8> {}
+impl<T: Fn() -> Option<u8>> InputProvider for T {}
+
+trait OutputConsumer: Fn(u8) {}
+impl<T: Fn(u8)> OutputConsumer for T {}
+
+struct IrRuntimeContext<'a, I: InputProvider, O: OutputConsumer> {
+    global_context: &'a IrGlobalContext<'a>,
+    input_provider: I,
+    output_consumer: O,
+}
+
+pub fn run_ir<InputProvider: Fn() -> Option<u8>, OutputConsumer: Fn(u8)>(
+    ir_functions: &Vec<IrFunction>,
+    function_name_mapping: HashMap<FunctionId, String>,
+    input_provider: InputProvider,
+    output_consumer: OutputConsumer,
+) {
     let global_context = IrGlobalContext {
         functions: ir_functions,
         function_name_mapping,
@@ -32,18 +50,40 @@ pub fn run_ir(ir_functions: &Vec<IrFunction>, function_name_mapping: HashMap<Fun
     }
 
     if let Some(main_id) = main_function_id {
-        let _raw_input_guard = RawModeGuard::new();
-        run_function(main_id, &global_context, vec![]);
+        let runtime_context = IrRuntimeContext {
+            global_context: &global_context,
+            input_provider,
+            output_consumer,
+        };
+        run_function(main_id, &runtime_context, vec![]);
     } else {
         panic!("No main function found in function name mapping");
     }
 }
 
-fn run_function(
+#[cfg(feature = "advanced-output")]
+pub fn run_ir_console(
+    ir_functions: &Vec<IrFunction>,
+    function_name_mapping: HashMap<FunctionId, String>,
+) {
+    let _raw_input_guard = RawModeGuard::new();
+    run_ir(
+        ir_functions,
+        function_name_mapping,
+        || Some(read_single_byte()),
+        |b: u8| {
+            print!("{}", b as char);
+            io::stdout().flush().expect("failed to flush stdout");
+        },
+    );
+}
+
+fn run_function<I: InputProvider, O: OutputConsumer>(
     function_id: FunctionId,
-    global_context: &IrGlobalContext,
+    runtime_context: &IrRuntimeContext<I, O>,
     parameters: Vec<Vec<u8>>,
 ) {
+    let global_context = runtime_context.global_context;
     let function = global_context
         .functions
         .iter()
@@ -97,7 +137,7 @@ fn run_function(
                 }
             }
             IrInstruction::Input { target } => {
-                let input_byte = read_single_byte();
+                let input_byte = (runtime_context.input_provider)().unwrap_or(0);
                 local_variables
                     .set_memory_contents(target, &[input_byte])
                     .expect("Failed to set memory contents for input instruction");
@@ -106,8 +146,9 @@ fn run_function(
                 let element_mem = local_variables
                     .get_memory_contents(element)
                     .expect("Failed to get memory contents for output instruction");
-                print!("{}", String::from_utf8_lossy(element_mem.as_slice()));
-                io::stdout().flush().expect("failed to flush stdout");
+                for &byte in &element_mem {
+                    (runtime_context.output_consumer)(byte);
+                }
             }
             IrInstruction::IndirectRead {
                 base,
@@ -162,7 +203,7 @@ fn run_function(
                             .expect("Failed to get memory contents for function call parameter")
                     })
                     .collect();
-                run_function(*function_id, global_context, parameter_values);
+                run_function(*function_id, runtime_context, parameter_values);
             }
         }
     }

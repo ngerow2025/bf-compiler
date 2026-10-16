@@ -3,6 +3,7 @@ pub mod ast_annotation;
 pub mod ast_runner;
 pub mod bump_allocator;
 pub mod codegen;
+#[cfg(feature = "advanced-output")]
 pub mod input_grabbing;
 pub mod ir;
 pub mod ir2;

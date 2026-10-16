@@ -1,9 +1,21 @@
+#[cfg(not(feature = "advanced-output"))]
+use std::io::{self, Read, Write};
+
+#[cfg(not(feature = "advanced-output"))]
 use compiler_bf_target::ast_runner::run_program;
+#[cfg(feature = "advanced-output")]
+use compiler_bf_target::ast_runner::run_program_console;
 use compiler_bf_target::codegen::codegen_program;
 use compiler_bf_target::ir::generate_ir;
+#[cfg(not(feature = "advanced-output"))]
 use compiler_bf_target::ir_runner::run_ir;
+#[cfg(feature = "advanced-output")]
+use compiler_bf_target::ir_runner::run_ir_console;
 use compiler_bf_target::ir2::generate_ir2;
+#[cfg(not(feature = "advanced-output"))]
 use compiler_bf_target::ir2_runner::run_ir2;
+#[cfg(feature = "advanced-output")]
+use compiler_bf_target::ir2_runner::run_ir2_console;
 use compiler_bf_target::source_annotation::SourceAnnotation;
 use compiler_bf_target::sources::SourceCodeOrigin;
 use compiler_bf_target::type_check::type_annotate_program;
@@ -28,6 +40,18 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    #[cfg(not(feature = "advanced-output"))]
+    let console_input = || {
+        let mut byte = [0u8; 1];
+        io::stdin().read_exact(&mut byte).ok()?;
+        Some(byte[0])
+    };
+    #[cfg(not(feature = "advanced-output"))]
+    let console_output = |b: u8| {
+        print!("{}", b as char);
+        io::stdout().flush().expect("failed to flush stdout");
+    };
+
     if cli.run {
         println!("Running code in all stages of compilation...");
     }
@@ -46,7 +70,10 @@ fn main() -> Result<()> {
 
     if cli.run {
         println!("Running AST... -----------------------");
-        run_program(&ast);
+        #[cfg(feature = "advanced-output")]
+        run_program_console(&ast);
+        #[cfg(not(feature = "advanced-output"))]
+        run_program(&ast, console_input, console_output);
         println!("Finished running AST. -----------------------\n");
     }
 
@@ -80,9 +107,21 @@ fn main() -> Result<()> {
         println!();
     }
 
+    #[cfg(feature = "advanced-output")]
     if cli.run {
         println!("Running IR... -----------------------");
-        run_ir(&generated_ir, function_name_mapping.clone());
+        run_ir_console(&generated_ir, function_name_mapping.clone());
+        println!("Finished running IR. -----------------------\n");
+    }
+    #[cfg(not(feature = "advanced-output"))]
+    if cli.run {
+        println!("Running IR... -----------------------");
+        run_ir(
+            &generated_ir,
+            function_name_mapping.clone(),
+            console_input,
+            console_output,
+        );
         println!("Finished running IR. -----------------------\n");
     }
 
@@ -96,11 +135,23 @@ fn main() -> Result<()> {
 
     let generated_ir2 = generate_ir2(&generated_ir);
 
+    #[cfg(feature = "advanced-output")]
+    if cli.run {
+        println!("Running IR2... -----------------------");
+        run_ir2_console(
+            generated_ir2.values().collect(),
+            function_name_mapping.clone(),
+        );
+        println!("Finished running IR2. -----------------------\n");
+    }
+    #[cfg(not(feature = "advanced-output"))]
     if cli.run {
         println!("Running IR2... -----------------------");
         run_ir2(
             generated_ir2.values().collect(),
             function_name_mapping.clone(),
+            console_input,
+            console_output,
         );
         println!("Finished running IR2. -----------------------\n");
     }
