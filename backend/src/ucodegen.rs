@@ -1,9 +1,9 @@
 use crate::ir2::{Ir2Function, Ir2Instruction};
-use crate::ir2_memory_representation::PhysicalLocation;
+use crate::ir2_memory_representation::{PhysicalLocation, PhysicalSlot};
 use crate::parser::FunctionId;
 use crate::util::transpose;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write};
 use std::iter;
 
 pub struct BfGenerator {
@@ -26,10 +26,10 @@ pub enum Location {
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Location::Absolute(x) => write!(f, "Abs({})", x),
-            Location::Relative(x) => write!(f, "Rel({})", x),
-            Location::OffsetAbsolute { base, offset } => {
-                write!(f, "OffsetAbs(base: {}, offset: {})", base, offset)
+            Self::Absolute(x) => write!(f, "Abs({x})"),
+            Self::Relative(x) => write!(f, "Rel({x})"),
+            Self::OffsetAbsolute { base, offset } => {
+                write!(f, "OffsetAbs(base: {base}, offset: {offset})")
             }
         }
     }
@@ -46,7 +46,7 @@ pub enum BfUcodeInstruction {
     },
     Inc(u8),
     Dec(u8),
-    Loop(Vec<BfUcodeInstruction>),
+    Loop(Vec<Self>),
     JumpLocation {
         this_location: LocationId,
         target_location: LocationId,
@@ -60,28 +60,27 @@ impl Display for BfUcodeInstruction {
             f,
             "{:?}",
             match self {
-                BfUcodeInstruction::Input => "Input".to_string(),
-                BfUcodeInstruction::Output => "Output".to_string(),
-                BfUcodeInstruction::MovePtr(x) => format!("MovePtr({})", x),
-                BfUcodeInstruction::MoveData { from, to } =>
-                    format!("RelMove(from: {}, to: {})", from, to),
-                BfUcodeInstruction::Inc(x) => format!("Inc({})", x),
-                BfUcodeInstruction::Dec(x) => format!("Dec({})", x),
-                BfUcodeInstruction::Loop(body) => {
+                Self::Input => "Input".to_string(),
+                Self::Output => "Output".to_string(),
+                Self::MovePtr(x) => format!("MovePtr({x})"),
+                Self::MoveData { from, to } => format!("RelMove(from: {from}, to: {to})"),
+                Self::Inc(x) => format!("Inc({x})"),
+                Self::Dec(x) => format!("Dec({x})"),
+                Self::Loop(body) => {
                     let mut body_str = String::new();
                     for instr in body {
-                        body_str.push_str(&format!("  {}\n", instr));
+                        let _ = writeln!(body_str, "  {instr}");
                     }
-                    format!("Loop {{\n{}}}", body_str)
+                    format!("Loop {{\n{body_str}}}")
                 }
-                BfUcodeInstruction::JumpLocation {
+                Self::JumpLocation {
                     this_location,
                     target_location,
                 } => format!(
                     "JumpLocation(this: {}, target: {})",
                     this_location.0, target_location.0
                 ),
-                BfUcodeInstruction::Clear => "Clear".to_string(),
+                Self::Clear => "Clear".to_string(),
             }
         )
     }
@@ -94,8 +93,9 @@ impl Default for BfGenerator {
 }
 
 impl BfGenerator {
-    pub fn new() -> BfGenerator {
-        BfGenerator { code: vec![] }
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { code: vec![] }
     }
 
     fn code_gen_ir_instruction(
@@ -152,7 +152,7 @@ impl BfGenerator {
                     .collect()
             }
             Ir2Instruction::NMove { targets, source } => {
-                for target in targets.iter() {
+                for target in targets {
                     assert_eq!(
                         target.get_size(),
                         source.get_size(),
@@ -163,7 +163,7 @@ impl BfGenerator {
                 let targets_loc_groups = transpose(
                     targets
                         .iter()
-                        .map(|target| target.get_all_locations())
+                        .map(PhysicalSlot::get_all_locations)
                         .collect(),
                 );
 
@@ -277,7 +277,7 @@ impl BfGenerator {
                 vec![BfUcodeInstruction::MoveData {
                     from: Location::OffsetAbsolute {
                         base: *base,
-                        offset: *offset as isize + 4,
+                        offset: isize::try_from(*offset).unwrap() + 4,
                     },
                     to: Location::Absolute(output.get_start()),
                 }]
@@ -416,15 +416,16 @@ impl BfGenerator {
         });
     }
 
-    pub fn ucodegen_program(program: HashMap<FunctionId, Ir2Function>) -> UCodeProgram {
+    #[must_use]
+    pub fn ucodegen_program(program: &HashMap<FunctionId, Ir2Function>) -> UCodeProgram {
         let mut total_results = HashMap::new();
         let mut entry_points = HashMap::new();
         for function_id in program.keys() {
             entry_points.insert(function_id, LocationId(entry_points.len() + 1));
         }
         let mut jump_points = entry_points.len() + 1;
-        for (function_id, function) in &program {
-            let mut bf_generator = BfGenerator::new();
+        for (function_id, function) in program {
+            let mut bf_generator = Self::new();
 
             for instruction in &function.code {
                 bf_generator.code_gen_ir_instruction(instruction, &mut jump_points, &entry_points);

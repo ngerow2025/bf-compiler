@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
+    hash::BuildHasher,
     io::{self, Write},
-    vec,
 };
 
 use crate::{
@@ -11,13 +11,16 @@ use crate::{
     parser::{FunctionId, IntLiteral},
 };
 
-struct IrGlobalContext<'a> {
+struct IrGlobalContext<'a, H: BuildHasher> {
     //holds all functions
     pub functions: &'a Vec<IrFunction>,
-    pub function_name_mapping: HashMap<FunctionId, String>,
+    pub function_name_mapping: HashMap<FunctionId, String, H>,
 }
 
-pub fn run_ir(ir_functions: &Vec<IrFunction>, function_name_mapping: HashMap<FunctionId, String>) {
+pub fn run_ir<H: BuildHasher>(
+    ir_functions: &Vec<IrFunction>,
+    function_name_mapping: HashMap<FunctionId, String, H>,
+) {
     let global_context = IrGlobalContext {
         functions: ir_functions,
         function_name_mapping,
@@ -33,16 +36,16 @@ pub fn run_ir(ir_functions: &Vec<IrFunction>, function_name_mapping: HashMap<Fun
 
     if let Some(main_id) = main_function_id {
         let _raw_input_guard = RawModeGuard::new();
-        run_function(main_id, &global_context, vec![]);
+        run_function(main_id, &global_context, &[]);
     } else {
         panic!("No main function found in function name mapping");
     }
 }
 
-fn run_function(
+fn run_function<H: BuildHasher>(
     function_id: FunctionId,
-    global_context: &IrGlobalContext,
-    parameters: Vec<Vec<u8>>,
+    global_context: &IrGlobalContext<H>,
+    parameters: &[Vec<u8>],
 ) {
     let function = global_context
         .functions
@@ -58,9 +61,9 @@ fn run_function(
             .expect("exact amount of capacity should have been alocated but allocate call failed");
     }
 
-    for (i, param) in function.parameters.iter().enumerate() {
+    for (param, arg) in function.parameters.iter().zip(parameters.iter()) {
         local_variables
-            .set_memory_contents(&param.register, &parameters[i])
+            .set_memory_contents(&param.register, arg)
             .expect("failed to set parameter memory contents");
     }
 
@@ -122,7 +125,13 @@ fn run_function(
                     "Offset register must be 1 byte in size for indirect read"
                 );
                 let read_value = local_variables
-                    .read_offset(base, offset_value[0] as usize)
+                    .read_offset(
+                        base,
+                        *offset_value
+                            .first()
+                            .expect("Offset register must contain one byte")
+                            as usize,
+                    )
                     .expect("Failed to read from memory in indirect read instruction");
                 local_variables.set_memory_contents(output, &[read_value]).expect("Failed to set memory contents for output register in indirect read instruction");
             }
@@ -146,7 +155,16 @@ fn run_function(
                     "Value register must be 1 byte in size for indirect write"
                 );
                 local_variables
-                    .write_offset(base, offset_value[0] as usize, value_to_write[0])
+                    .write_offset(
+                        base,
+                        *offset_value
+                            .first()
+                            .expect("Offset register must contain one byte")
+                            as usize,
+                        *value_to_write
+                            .first()
+                            .expect("Value register must contain one byte"),
+                    )
                     .expect("Failed to write to memory in indirect write instruction");
             }
             IrInstruction::Call {
@@ -162,7 +180,7 @@ fn run_function(
                             .expect("Failed to get memory contents for function call parameter")
                     })
                     .collect();
-                run_function(*function_id, global_context, parameter_values);
+                run_function(*function_id, global_context, &parameter_values);
             }
         }
     }

@@ -30,7 +30,7 @@ pub fn run_program<T: ASTAnnotation>(program: &Program<T>) {
         .find(|f| f.name == "main")
         .expect("No main function found");
 
-    run_function(main_function, &global_context, vec![]);
+    run_function(main_function, &global_context, &[]);
 }
 
 #[allow(dead_code)]
@@ -57,18 +57,18 @@ enum Value {
 }
 
 impl Value {
-    pub fn get_type(&self) -> Option<ASTTypeKind> {
+    pub const fn get_type(&self) -> Option<ASTTypeKind> {
         match self {
-            Value::I64(_) => Some(ASTTypeKind::I64),
-            Value::U64(_) => Some(ASTTypeKind::U64),
-            Value::I32(_) => Some(ASTTypeKind::I32),
-            Value::U32(_) => Some(ASTTypeKind::U32),
-            Value::I16(_) => Some(ASTTypeKind::I16),
-            Value::U16(_) => Some(ASTTypeKind::U16),
-            Value::I8(_) => Some(ASTTypeKind::I8),
-            Value::U8(_) => Some(ASTTypeKind::U8),
-            Value::String(s) => Some(ASTTypeKind::Str(s.len())),
-            Value::None => None,
+            Self::I64(_) => Some(ASTTypeKind::I64),
+            Self::U64(_) => Some(ASTTypeKind::U64),
+            Self::I32(_) => Some(ASTTypeKind::I32),
+            Self::U32(_) => Some(ASTTypeKind::U32),
+            Self::I16(_) => Some(ASTTypeKind::I16),
+            Self::U16(_) => Some(ASTTypeKind::U16),
+            Self::I8(_) => Some(ASTTypeKind::I8),
+            Self::U8(_) => Some(ASTTypeKind::U8),
+            Self::String(s) => Some(ASTTypeKind::Str(s.len())),
+            Self::None => None,
         }
     }
 }
@@ -88,14 +88,18 @@ impl FunctionContext {
 fn run_function<T: ASTAnnotation>(
     function: &Function<T>,
     global_context: &GlobalContext<T>,
-    arguments: Vec<Value>,
+    arguments: &[Value],
 ) {
     let mut function_context = FunctionContext::new();
-    for (i, param) in function.params.iter().enumerate() {
+    assert!(
+        arguments.len() == function.params.len(),
+        "Argument count mismatch"
+    );
+    for (param, arg) in function.params.iter().zip(arguments.iter()) {
         function_context.variables.insert(
             param.variable_index,
             VariableInfo {
-                value: arguments[i].clone(),
+                value: arg.clone(),
                 id: param.variable_index,
                 type_: param.type_.kind,
                 name: param.name.clone(),
@@ -114,10 +118,10 @@ fn run_block<T: ASTAnnotation>(
     for block_item in &block.statements {
         match block_item {
             BlockItem::Block(inner_block) => {
-                run_block(inner_block, global_context, function_context)
+                run_block(inner_block, global_context, function_context);
             }
             BlockItem::Statement(inner_statement) => {
-                run_statement(inner_statement, global_context, function_context)
+                run_statement(inner_statement, global_context, function_context);
             }
         }
     }
@@ -143,7 +147,7 @@ fn run_statement<T: ASTAnnotation>(
                     value,
                     id: *variable_index,
                     type_: type_.kind,
-                    name: name.to_string(),
+                    name: name.clone(),
                 },
             );
         }
@@ -251,7 +255,11 @@ fn run_expression<T: ASTAnnotation>(
         } => {
             if qualified_name.full_name() == "std::out" {
                 assert_eq!(arguments.len(), 1, "std::out expects exactly one argument");
-                let arg_value = run_expression(&arguments[0], global_context, function_context);
+                let arg_value = run_expression(
+                    arguments.first().expect("Expected exactly one argument"),
+                    global_context,
+                    function_context,
+                );
                 assert_eq!(
                     arg_value.get_type(),
                     Some(ASTTypeKind::U8),
@@ -278,10 +286,10 @@ fn run_expression<T: ASTAnnotation>(
                 run_function(
                     function,
                     global_context,
-                    arguments
+                    &arguments
                         .iter()
                         .map(|arg| run_expression(arg, global_context, function_context))
-                        .collect(),
+                        .collect::<Vec<_>>(),
                 );
                 Value::None
             }

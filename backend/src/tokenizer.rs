@@ -1,5 +1,5 @@
+use std::fmt::Display;
 use std::sync::Arc;
-use std::{fmt::Display, ops::Deref};
 
 use logos::Logos;
 use miette::{Diagnostic, NamedSource, SourceSpan};
@@ -11,7 +11,7 @@ use crate::sources::{SourceCodeOrigin, SourceLocation};
 
 // --- Data Structures ---
 
-#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum LexingErrorKind {
     #[error("Invalid escape sequence: \\{0}")]
     InvalidEscapeSequence(char),
@@ -27,7 +27,7 @@ pub enum LexingErrorKind {
     Other,
 }
 
-#[derive(Debug, Diagnostic, PartialEq, Clone)]
+#[derive(Debug, Diagnostic, PartialEq, Eq, Clone)]
 pub struct LexingError {
     #[source_code]
     pub src: NamedSource<String>,
@@ -54,7 +54,7 @@ impl Serialize for LexingError {
     }
 }
 
-#[derive(Debug, Diagnostic, PartialEq, Clone, Error, Serialize)]
+#[derive(Debug, Diagnostic, PartialEq, Eq, Clone, Error, Serialize)]
 #[error("Lexing pass failed with {} error(s)", errors.len())]
 pub struct LexingErrorCollection {
     #[related]
@@ -73,7 +73,7 @@ impl From<LexingError> for LexingErrorCollection {
 
 impl Default for LexingError {
     fn default() -> Self {
-        LexingError {
+        Self {
             src: NamedSource::new("input", String::new()),
             span: SourceSpan::new(0.into(), 0),
             kind: LexingErrorKind::Other,
@@ -93,7 +93,7 @@ impl std::error::Error for LexingError {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Logos, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Logos, Serialize)]
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(error(LexingError, callback = |lex| LexingError {
     src: NamedSource::new("input", lex.source().to_string()),
@@ -163,7 +163,7 @@ pub enum Token {
     CharLiteral(char),
 }
 
-fn parse_string(lex: &mut logos::Lexer<Token>) -> std::result::Result<String, LexingError> {
+fn parse_string(lex: &logos::Lexer<Token>) -> std::result::Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
@@ -200,7 +200,7 @@ fn parse_string(lex: &mut logos::Lexer<Token>) -> std::result::Result<String, Le
     Ok(result)
 }
 
-fn parse_char(lex: &mut logos::Lexer<Token>) -> std::result::Result<char, LexingError> {
+fn parse_char(lex: &logos::Lexer<Token>) -> std::result::Result<char, LexingError> {
     let s = lex.slice();
     let span = lex.span();
     let source = lex.source();
@@ -254,7 +254,7 @@ fn parse_char(lex: &mut logos::Lexer<Token>) -> std::result::Result<char, Lexing
     Ok(c)
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Locatable<T> {
     pub value: T,
     pub loc: SourceLocation,
@@ -268,24 +268,26 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    #[must_use]
     pub fn new(input: &'a str, filename: Option<String>) -> Self {
         Lexer {
             input,
-            origin: match filename {
-                Some(name) => SourceCodeOrigin::File(name.into()),
-                None => SourceCodeOrigin::Anon(Arc::new(input.to_string())),
-            },
+            origin: filename.map_or_else(
+                || SourceCodeOrigin::Anon(Arc::new(input.to_string())),
+                |name| SourceCodeOrigin::File(name.into()),
+            ),
         }
     }
 
     // --- Core Logic ---
 
+    #[must_use]
     pub fn finalize_error(&self, lex: &logos::Lexer<Token>, err: LexingError) -> LexingError {
         LexingError {
             src: NamedSource::new(
                 match &self.origin {
-                    SourceCodeOrigin::File(name) => name.deref(),
-                    SourceCodeOrigin::Anon(code) => code.deref(),
+                    SourceCodeOrigin::File(name) => name.as_ref(),
+                    SourceCodeOrigin::Anon(code) => code.as_ref(),
                 },
                 self.input.to_string(),
             ),

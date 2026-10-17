@@ -16,6 +16,7 @@ pub enum BfInstruction {
     LoopEnd,
 }
 
+#[must_use]
 pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfInstruction> {
     let mut code_blocks = HashMap::new();
 
@@ -48,7 +49,7 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
                 bf_instructions = Vec::new();
                 block_id = this_location;
             } else {
-                panic!("Unhandled instruction: {:?} ?", instruction);
+                panic!("Unhandled instruction: {instruction}?");
             }
         }
         bf_instructions.push(BfInstruction::Left);
@@ -73,7 +74,7 @@ pub fn codegen_program(ucode: UCodeProgram, entry_point: FunctionId) -> Vec<BfIn
     sorted_code_blocks.sort_by_key(|(location_id, _)| *location_id);
 
     bf_code.extend(codegen_switch_statement(
-        sorted_code_blocks,
+        &sorted_code_blocks,
         0,
         vec![], //default case is empty for now
     ));
@@ -112,7 +113,7 @@ macro_rules! bf_vec {
 }
 
 fn codegen_switch_statement(
-    remaining_cases: Vec<(LocationId, Vec<BfInstruction>)>,
+    remaining_cases: &[(LocationId, Vec<BfInstruction>)],
     current_subtracted_val: usize,
     default_case: Vec<BfInstruction>,
 ) -> Vec<BfInstruction> {
@@ -121,7 +122,7 @@ fn codegen_switch_statement(
             let diff = location_id.0 - current_subtracted_val;
             let difference_code = vec![BfInstruction::Dec; diff];
             let switch_statement_code =
-                codegen_switch_statement(Vec::from(rest_cases), location_id.0, default_case);
+                codegen_switch_statement(rest_cases, location_id.0, default_case);
 
             bf_vec![
                 list difference_code,
@@ -226,10 +227,11 @@ fn codegen_move_ptr(
         Location::Absolute(x) => move_to_absolute(current_point_position, x),
         Location::Relative(x) => {
             *current_point_position += x;
+
             if x >= 0 {
-                vec![BfInstruction::Right; x as usize]
+                vec![BfInstruction::Right; x.unsigned_abs()]
             } else {
-                vec![BfInstruction::Left; (-x) as usize]
+                vec![BfInstruction::Left; x.unsigned_abs()]
             }
         }
         Location::OffsetAbsolute { offset, base } => {
@@ -248,22 +250,22 @@ fn move_to_absolute(
     if distance <= 0 {
         vec![BfInstruction::Left; distance.unsigned_abs()]
     } else {
-        vec![BfInstruction::Right; distance as usize]
+        vec![BfInstruction::Right; distance.unsigned_abs()]
     }
 }
 
 impl Display for BfInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = match self {
-            BfInstruction::Right => '>',
-            BfInstruction::Left => '<',
-            BfInstruction::Inc => '+',
-            BfInstruction::Dec => '-',
-            BfInstruction::Output => '.',
-            BfInstruction::Input => ',',
-            BfInstruction::LoopStart => '[',
-            BfInstruction::LoopEnd => ']',
+            Self::Right => '>',
+            Self::Left => '<',
+            Self::Inc => '+',
+            Self::Dec => '-',
+            Self::Output => '.',
+            Self::Input => ',',
+            Self::LoopStart => '[',
+            Self::LoopEnd => ']',
         };
-        write!(f, "{}", c)
+        write!(f, "{c}")
     }
 }

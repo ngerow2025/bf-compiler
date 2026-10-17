@@ -12,7 +12,7 @@ use crate::{
         ConstructVarDeclAnnotationParams, ConstructVariableAccessAnnotationParams,
         ConstructVariableAccessExpressionAnnotationParams,
     },
-    parser::{BlockItem, Expression},
+    parser::{BlockItem, Expression, Statement},
     sources::{SourceCodeOrigin, SourceLocation},
 };
 
@@ -23,8 +23,9 @@ pub struct SourceAnnotation {
 }
 
 impl SourceAnnotation {
-    pub fn new(source_code: SourceCodeOrigin) -> Self {
-        SourceAnnotation { source_code }
+    #[must_use]
+    pub const fn new(source_code: SourceCodeOrigin) -> Self {
+        Self { source_code }
     }
 }
 
@@ -77,9 +78,9 @@ impl ASTAnnotation for SourceAnnotation {
                 .iter()
                 .map(|stmt| match stmt {
                     BlockItem::Statement(statement) => match statement {
-                        crate::parser::Statement::Expression { annotation, .. } => annotation,
-                        crate::parser::Statement::Assignment { annotation, .. } => annotation,
-                        crate::parser::Statement::VarDecl { annotation, .. } => annotation,
+                        Statement::Expression { annotation, .. }
+                        | Statement::Assignment { annotation, .. }
+                        | Statement::VarDecl { annotation, .. } => annotation,
                     },
                     BlockItem::Block(block) => &block.annotation,
                 })
@@ -166,12 +167,12 @@ impl ASTAnnotation for SourceAnnotation {
             std::iter::once(&params.qualified_name.annotation)
                 .chain(std::iter::once(&params.left_paren_token.loc))
                 .chain(params.arguments.iter().map(|arg| match arg {
-                    Expression::IntLiteral { annotation, .. } => annotation,
-                    Expression::VariableAccess { annotation, .. } => annotation,
-                    Expression::FnCall { annotation, .. } => annotation,
-                    Expression::StringLiteral { annotation, .. } => annotation,
-                    Expression::ArrayAccess { annotation, .. } => annotation,
-                    Expression::CharLiteral { annotation, .. } => annotation,
+                    Expression::IntLiteral { annotation, .. }
+                    | Expression::VariableAccess { annotation, .. }
+                    | Expression::FnCall { annotation, .. }
+                    | Expression::StringLiteral { annotation, .. }
+                    | Expression::ArrayAccess { annotation, .. }
+                    | Expression::CharLiteral { annotation, .. } => annotation,
                 }))
                 .chain(params.comma_tokens.iter().map(|comma| &comma.loc))
                 .chain(std::iter::once(&params.right_paren_token.loc)),

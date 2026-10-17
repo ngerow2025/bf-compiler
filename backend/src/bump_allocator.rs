@@ -10,10 +10,11 @@ pub struct BumpAllocator<'alloc, T> {
     allocated_memory: HashMap<T, &'alloc mut [u8]>,
 }
 
-impl<'alloc, T> BumpAllocator<'alloc, T>
+impl<T> BumpAllocator<'_, T>
 where
     T: Hash + Eq + Copy,
 {
+    #[must_use]
     pub fn new(size: usize) -> Self {
         Self {
             memory: UnsafeCell::new(vec![0; size].into_boxed_slice()),
@@ -102,10 +103,10 @@ where
             .allocated_memory
             .get(&key)
             .ok_or(BumpAllocatorError::KeyNotFound)?;
-        if offset >= mem.len() {
-            return Err(BumpAllocatorError::MemorySizeMismatch);
-        }
-        Ok(mem[offset])
+
+        mem.get(offset)
+            .copied()
+            .ok_or(BumpAllocatorError::MemorySizeMismatch)
     }
 
     pub fn write_offset(
@@ -118,11 +119,10 @@ where
             .allocated_memory
             .get_mut(&key)
             .ok_or(BumpAllocatorError::KeyNotFound)?;
-        if offset >= mem.len() {
-            return Err(BumpAllocatorError::MemorySizeMismatch);
-        }
-        mem[offset] = value;
-        Ok(())
+
+        mem.get_mut(offset)
+            .map(|byte| *byte = value)
+            .ok_or(BumpAllocatorError::MemorySizeMismatch)
     }
 }
 

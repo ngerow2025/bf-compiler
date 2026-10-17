@@ -93,11 +93,13 @@ impl Display for PhysicalLocation {
 }
 
 impl PhysicalLocation {
-    pub fn new(offset: usize) -> Self {
-        PhysicalLocation(offset)
+    #[must_use]
+    pub const fn new(offset: usize) -> Self {
+        Self(offset)
     }
 
-    pub fn get_difference(from: PhysicalLocation, to: PhysicalLocation) -> isize {
+    #[must_use]
+    pub const fn get_difference(from: Self, to: Self) -> isize {
         from.0 as isize - to.0 as isize
     }
 }
@@ -113,7 +115,7 @@ impl Add<PhysicalLocation> for PhysicalSlot {
     type Output = Self;
 
     fn add(self, rhs: PhysicalLocation) -> Self::Output {
-        PhysicalSlot {
+        Self {
             location: self.location + rhs.0,
             size: self.size,
         }
@@ -121,45 +123,52 @@ impl Add<PhysicalLocation> for PhysicalSlot {
 }
 
 impl PhysicalSlot {
+    #[must_use]
     pub fn from_start_end_inclusive(start: PhysicalLocation, end: PhysicalLocation) -> Self {
         assert!(
             end.0 >= start.0,
             "end must be greater than or equal to start"
         );
-        PhysicalSlot {
+        Self {
             location: start,
             size: end.0 - start.0 + 1,
         }
     }
 
-    pub fn from_start_size(start: PhysicalLocation, size: usize) -> Self {
-        PhysicalSlot {
+    #[must_use]
+    pub const fn from_start_size(start: PhysicalLocation, size: usize) -> Self {
+        Self {
             location: start,
             size,
         }
     }
 
-    pub fn intersects(&self, other: &PhysicalSlot) -> bool {
-        let self_end = PhysicalLocation(self.location.0 + self.size - 1);
-        let other_end = PhysicalLocation(other.location.0 + other.size - 1);
+    #[must_use]
+    pub fn intersects(&self, other: &Self) -> bool {
+        let self_end = self.get_end();
+        let other_end = other.get_end();
         !(self_end < other.location || other_end < self.location)
     }
 
     // this should only be used for dereferencing for array variables
-    pub fn get_start(&self) -> PhysicalLocation {
+    #[must_use]
+    pub const fn get_start(&self) -> PhysicalLocation {
         self.location
     }
 
     //this is the last location inside of the slot
+    #[must_use]
     pub fn get_end(&self) -> PhysicalLocation {
         assert!(self.size > 0, "cannot get end of empty slot");
         PhysicalLocation(self.location.0 + self.size - 1)
     }
 
-    pub fn get_size(&self) -> usize {
+    #[must_use]
+    pub const fn get_size(&self) -> usize {
         self.size
     }
 
+    #[must_use]
     pub fn get_all_locations(&self) -> Vec<PhysicalLocation> {
         (0..self.size)
             .map(|i| PhysicalLocation(self.location.0 + i))
@@ -188,8 +197,9 @@ impl<V> PhysicalLocationAllocator<V>
 where
     V: Debug + Clone,
 {
+    #[must_use]
     pub fn new() -> Self {
-        PhysicalLocationAllocator {
+        Self {
             open_spaces: vec![SpaceInterval::Open {
                 start: PhysicalLocation(0),
             }],
@@ -374,6 +384,7 @@ where
     }
 
     //this finds the start of the open interval of free space
+    #[must_use]
     pub fn free_space_start(&self) -> PhysicalLocation {
         for open_space in &self.open_spaces {
             match open_space {
@@ -386,6 +397,7 @@ where
         panic!("No open space found in infinite tape???");
     }
 
+    #[must_use]
     pub fn get_all_allocations(&self) -> Vec<(PhysicalSlot, V)> {
         self.registers_in_use.clone()
     }
@@ -402,8 +414,9 @@ pub struct Tape {
 }
 
 impl Tape {
-    pub fn new() -> Self {
-        Tape { data: vec![] }
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { data: vec![] }
     }
 }
 
@@ -419,7 +432,7 @@ pub struct TapeView<'a> {
 }
 
 impl<'a> TapeView<'a> {
-    pub fn new(tape: &'a mut Tape) -> Self {
+    pub const fn new(tape: &'a mut Tape) -> Self {
         TapeView {
             view: tape,
             offset: 0,
@@ -427,8 +440,7 @@ impl<'a> TapeView<'a> {
     }
 
     pub fn read(&mut self, index: PhysicalLocation) -> u8 {
-        self.ensure_capacity(index.0);
-        self.view.data[self.offset + index.0]
+        *self.get_byte_mut(index.0)
     }
 
     pub fn read_slot_single(&mut self, index: PhysicalSlot) -> u8 {
@@ -441,18 +453,22 @@ impl<'a> TapeView<'a> {
     }
 
     pub fn write(&mut self, index: PhysicalLocation, value: u8) {
-        self.ensure_capacity(index.0);
-        self.view.data[self.offset + index.0] = value;
+        *self.get_byte_mut(index.0) = value;
     }
 
-    fn ensure_capacity(&mut self, index: usize) {
+    fn get_byte_mut(&mut self, index: usize) -> &mut u8 {
         let required_length = self.offset + index + 1;
         if self.view.data.len() < required_length {
             self.view.data.resize(required_length, 0);
         }
+
+        self.view
+            .data
+            .get_mut(self.offset + index)
+            .expect("just allocated the needed memory")
     }
 
-    pub fn get_offset_view<'b>(&'b mut self, offset: PhysicalLocation) -> TapeView<'b> {
+    pub const fn get_offset_view(&mut self, offset: PhysicalLocation) -> TapeView<'_> {
         TapeView {
             view: self.view,
             offset: self.offset + offset.0,

@@ -30,21 +30,27 @@ pub struct WasmToken {
 #[wasm_bindgen]
 impl WasmToken {
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn kind(&self) -> String {
         self.kind.clone()
     }
 
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn value(&self) -> Option<String> {
         self.value.clone()
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn span_start(&self) -> usize {
         self.span_start
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn span_len(&self) -> usize {
         self.span_len
     }
@@ -59,10 +65,14 @@ pub struct WasmTokens {
 #[wasm_bindgen]
 impl WasmTokens {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
 
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
@@ -75,6 +85,7 @@ impl WasmTokens {
         self.tokens.iter().map(token_to_wasm).collect()
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.tokens)
     }
@@ -89,21 +100,31 @@ pub struct WasmAst {
 #[wasm_bindgen]
 impl WasmAst {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_count(&self) -> usize {
         self.ast.functions.len()
     }
 
+    #[must_use]
     pub fn get_function_name(&self, index: usize) -> Option<String> {
         self.ast.functions.get(index).map(|f| f.name.clone())
     }
 
+    #[must_use]
     pub fn get_function_names(&self) -> Vec<String> {
         self.ast.functions.iter().map(|f| f.name.clone()).collect()
     }
 
     pub fn get_raw_func(&self) -> Result<JsValue, JsValue> {
-        serde_wasm_bindgen::to_value(&self.ast.functions[0])
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(
+            &self
+                .ast
+                .functions
+                .first()
+                .ok_or("there are no functions in the AST")?,
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn get_all_functions(&self) -> Result<JsValue, JsValue> {
@@ -111,6 +132,7 @@ impl WasmAst {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.ast)
     }
@@ -125,14 +147,18 @@ pub struct WasmTypedAst {
 #[wasm_bindgen]
 impl WasmTypedAst {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_count(&self) -> usize {
         self.typed.functions.len()
     }
 
+    #[must_use]
     pub fn get_function_names(&self) -> Vec<String> {
         self.typed.function_name_mapping.values().cloned().collect()
     }
 
+    #[must_use]
     pub fn has_main(&self) -> bool {
         self.typed
             .function_name_mapping
@@ -140,6 +166,7 @@ impl WasmTypedAst {
             .any(|n| n == "main")
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.typed)
     }
@@ -155,19 +182,25 @@ pub struct WasmIrFunction {
 #[wasm_bindgen]
 impl WasmIrFunction {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_id(&self) -> usize {
         self.function_id
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn instruction_count(&self) -> usize {
         self.instructions.len()
     }
 
+    #[must_use]
     pub fn get_instruction(&self, index: usize) -> Option<String> {
         self.instructions.get(index).cloned()
     }
 
+    #[must_use]
     pub fn get_instructions(&self) -> Vec<String> {
         self.instructions.clone()
     }
@@ -182,17 +215,21 @@ pub struct WasmIr {
 #[wasm_bindgen]
 impl WasmIr {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_count(&self) -> usize {
         self.ir.len()
     }
 
+    #[must_use]
     pub fn get_function(&self, index: usize) -> Option<WasmIrFunction> {
         self.ir.get(index).map(|f| WasmIrFunction {
             function_id: f.id.0,
-            instructions: f.code.iter().map(|i| format!("{:?}", i)).collect(),
+            instructions: f.code.iter().map(ToString::to_string).collect(),
         })
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.ir)
     }
@@ -208,19 +245,25 @@ pub struct WasmIr2Function {
 #[wasm_bindgen]
 impl WasmIr2Function {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_id(&self) -> usize {
         self.function_id
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn instruction_count(&self) -> usize {
         self.instructions.len()
     }
 
+    #[must_use]
     pub fn get_instruction(&self, index: usize) -> Option<String> {
         self.instructions.get(index).cloned()
     }
 
+    #[must_use]
     pub fn get_instructions(&self) -> Vec<String> {
         self.instructions.clone()
     }
@@ -235,23 +278,27 @@ pub struct WasmIr2 {
 #[wasm_bindgen]
 impl WasmIr2 {
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn function_count(&self) -> usize {
         self.ir2.len()
     }
 
+    #[must_use]
     pub fn get_function_ids(&self) -> Vec<usize> {
         self.ir2.keys().map(|id| id.0).collect()
     }
 
+    #[must_use]
     pub fn get_function(&self, function_id: usize) -> Option<WasmIr2Function> {
         self.ir2
             .get(&FunctionId(function_id))
             .map(|f| WasmIr2Function {
                 function_id,
-                instructions: f.code.iter().map(|i| format!("{}", i)).collect(),
+                instructions: f.code.iter().map(ToString::to_string).collect(),
             })
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.ir2)
     }
@@ -267,19 +314,25 @@ pub struct WasmUCodeFunction {
 #[wasm_bindgen]
 impl WasmUCodeFunction {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn function_id(&self) -> usize {
         self.function_id
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn instruction_count(&self) -> usize {
         self.instructions.len()
     }
 
+    #[must_use]
     pub fn get_instruction(&self, index: usize) -> Option<String> {
         self.instructions.get(index).cloned()
     }
 
+    #[must_use]
     pub fn get_instructions(&self) -> Vec<String> {
         self.instructions.clone()
     }
@@ -294,24 +347,28 @@ pub struct WasmUCode {
 #[wasm_bindgen]
 impl WasmUCode {
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn function_count(&self) -> usize {
         self.ucode.functions.len()
     }
 
+    #[must_use]
     pub fn get_function_ids(&self) -> Vec<usize> {
         self.ucode.functions.keys().map(|id| id.0).collect()
     }
 
+    #[must_use]
     pub fn get_function(&self, function_id: usize) -> Option<WasmUCodeFunction> {
         self.ucode
             .functions
             .get(&FunctionId(function_id))
             .map(|instrs| WasmUCodeFunction {
                 function_id,
-                instructions: instrs.iter().map(|i| format!("{}", i)).collect(),
+                instructions: instrs.iter().map(ToString::to_string).collect(),
             })
     }
 
+    #[must_use]
     pub fn get_entry_point(&self, function_id: usize) -> Option<usize> {
         self.ucode
             .entry_points
@@ -319,6 +376,7 @@ impl WasmUCode {
             .map(|loc| loc.0)
     }
 
+    #[must_use]
     pub fn debug_string(&self) -> String {
         format!("{:#?}", self.ucode)
     }
@@ -333,21 +391,27 @@ pub struct WasmBfProgram {
 #[wasm_bindgen]
 impl WasmBfProgram {
     #[wasm_bindgen(getter)]
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn len(&self) -> usize {
         self.instructions.len()
     }
 
+    #[allow(clippy::missing_const_for_fn)] // This is because this method cannot be const due to WASM bindings
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty()
     }
 
-    #[allow(clippy::inherent_to_string_shadow_display)]
+    #[allow(clippy::inherent_to_string_shadow_display)] //this is because this method must be explicitly exposed for WASM access
+    #[must_use]
     pub fn to_string(&self) -> String {
-        format!("{}", self)
+        format!("{self}")
     }
 
+    #[must_use]
     pub fn get_instruction(&self, index: usize) -> Option<String> {
-        self.instructions.get(index).map(|i| i.to_string())
+        self.instructions.get(index).map(ToString::to_string)
     }
 }
 
@@ -401,7 +465,7 @@ fn token_to_wasm(loc_token: &Locatable<Token>) -> WasmToken {
 }
 
 fn bf_program_string(program: &[BfInstruction]) -> String {
-    program.iter().map(|i| i.to_string()).collect::<String>()
+    program.iter().map(ToString::to_string).collect::<String>()
 }
 
 // ============================================================================
@@ -430,7 +494,7 @@ pub fn tokenize(source: &str) -> Result<WasmTokens, JsValue> {
 pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
     let source_arc = Arc::new(source.to_string());
     let mut source_annotator = SourceAnnotation {
-        source_code: SourceCodeOrigin::Anon(source_arc.clone()),
+        source_code: SourceCodeOrigin::Anon(source_arc),
     };
 
     let mut parser = crate::parser::Parser::new(tokens.tokens.clone(), &mut source_annotator);
@@ -448,6 +512,7 @@ pub fn parse(tokens: &WasmTokens, source: &str) -> Result<WasmAst, JsValue> {
 
 /// Type check the AST
 #[wasm_bindgen]
+#[must_use]
 pub fn type_check(ast: &WasmAst) -> WasmTypedAst {
     let typed = type_annotate_program(&ast.ast);
     WasmTypedAst { typed }
@@ -455,6 +520,7 @@ pub fn type_check(ast: &WasmAst) -> WasmTypedAst {
 
 /// Generate IR from typed AST
 #[wasm_bindgen]
+#[must_use]
 pub fn gen_ir(typed: &WasmTypedAst) -> WasmIr {
     let ir = generate_ir(&typed.typed);
     WasmIr { ir }
@@ -462,6 +528,7 @@ pub fn gen_ir(typed: &WasmTypedAst) -> WasmIr {
 
 /// Generate IR2 from IR
 #[wasm_bindgen]
+#[must_use]
 pub fn gen_ir2(ir: &WasmIr) -> WasmIr2 {
     let ir2 = generate_ir2(&ir.ir);
     WasmIr2 { ir2 }
@@ -469,8 +536,9 @@ pub fn gen_ir2(ir: &WasmIr) -> WasmIr2 {
 
 /// Generate UCode from IR2
 #[wasm_bindgen]
+#[must_use]
 pub fn gen_ucode(ir2: &WasmIr2) -> WasmUCode {
-    let ucode = crate::ucodegen::BfGenerator::ucodegen_program(ir2.ir2.clone());
+    let ucode = crate::ucodegen::BfGenerator::ucodegen_program(&ir2.ir2);
     WasmUCode { ucode }
 }
 
@@ -506,6 +574,7 @@ pub fn compile_to_bf(source: &str) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn init() -> JsValue {
     console_error_panic_hook::set_once();
     JsValue::from_str("WASM module initialized")

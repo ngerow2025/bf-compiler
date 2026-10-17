@@ -2,7 +2,9 @@ use std::fmt::Display;
 use std::{collections::HashMap, vec};
 
 use crate::parser::{FunctionId, IntLiteral, VariableId};
-use crate::type_check::*;
+use crate::type_check::{
+    TypedBlock, TypedBlockItem, TypedExpression, TypedFunction, TypedProgram, TypedStatement,
+};
 
 #[derive(Debug)]
 pub enum IrInstruction {
@@ -64,6 +66,7 @@ pub struct IrParameter {
     pub name: String,
 }
 
+#[must_use]
 pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
     ast.functions
         .iter()
@@ -110,7 +113,9 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                                 assert_eq!(parameters.len(), 1);
                                 deleted_registers.push(output);
                                 IrInstruction::Output {
-                                    element: parameters[0],
+                                    element: *parameters
+                                        .first()
+                                        .expect("there should only be a single param for std::out"),
                                 }
                             } else if ast.function_name_mapping.get(&function_id)
                                 == Some(&"std::in".to_string())
@@ -128,7 +133,7 @@ pub fn generate_ir(ast: &TypedProgram) -> Vec<IrFunction> {
                         a => a,
                     })
                     .collect();
-                let mut new_registers = old_registers.clone();
+                let mut new_registers = old_registers;
                 new_registers.retain(|k, _| !deleted_registers.contains(k));
                 IrFunction {
                     id,
@@ -148,6 +153,7 @@ pub struct RegisterTracker {
     variable_mapping: HashMap<VariableId, IrRegisterId>,
 }
 
+#[must_use]
 pub fn lower_function(function: &TypedFunction) -> (Vec<IrInstruction>, RegisterTracker) {
     let mut function_lowerer = FunctionLowerer::new(
         function
@@ -167,8 +173,9 @@ impl Default for RegisterTracker {
 }
 
 impl RegisterTracker {
+    #[must_use]
     pub fn new() -> Self {
-        RegisterTracker {
+        Self {
             registers: HashMap::new(),
             variable_mapping: HashMap::new(),
         }
@@ -192,10 +199,12 @@ impl RegisterTracker {
         new_reg_id
     }
 
+    #[must_use]
     pub fn lookup_register(&self, var_id: &VariableId) -> Option<IrRegisterId> {
-        self.variable_mapping.get(var_id).cloned()
+        self.variable_mapping.get(var_id).copied()
     }
 
+    #[must_use]
     pub fn lookup_register_from_id(&self, reg_id: IrRegisterId) -> Option<&IrRegister> {
         self.registers.get(&reg_id)
     }
@@ -220,7 +229,7 @@ struct FunctionLowerer {
 
 impl FunctionLowerer {
     fn new(variable_names: HashMap<VariableId, String>) -> Self {
-        FunctionLowerer {
+        Self {
             registers: RegisterTracker::new(),
             variable_names,
         }
@@ -262,7 +271,8 @@ impl FunctionLowerer {
                         "var%{}%",
                         self.variable_names
                             .get(var)
-                            .unwrap_or(&format!("unnamed_var_{}", var.0))
+                            .cloned()
+                            .unwrap_or_else(|| format!("unnamed_var_{}", var.0))
                     ),
                 );
 
@@ -297,7 +307,7 @@ impl FunctionLowerer {
             TypedExpression::IntLiteral { type_, int_literal } => {
                 let new_reg = self.registers.create_intermediate_register(
                     type_.size_in_bytes(),
-                    &format!("int_literal_tmp({})", int_literal),
+                    &format!("int_literal_tmp({int_literal})"),
                 );
                 let instructions = vec![IrInstruction::Copy {
                     target: new_reg,
@@ -313,7 +323,7 @@ impl FunctionLowerer {
                     type_.size_in_bytes(),
                     &format!(
                         "string_literal_tmp({})",
-                        sanatize_string_literal(string_literal)
+                        sanitize_string_literal(string_literal)
                     ),
                 );
                 let instructions = vec![IrInstruction::Copy {
@@ -343,7 +353,7 @@ impl FunctionLowerer {
                 }
                 let output_reg = self.registers.create_intermediate_register(
                     type_.size_in_bytes(),
-                    &format!("call_output_tmp({})", function),
+                    &format!("call_output_tmp({function})"),
                 );
                 instructions.push(IrInstruction::Call {
                     function_id: *function,
@@ -366,7 +376,8 @@ impl FunctionLowerer {
                         "array_access_output_tmp({})",
                         self.variable_names
                             .get(array)
-                            .unwrap_or(&format!("unnamed_array_{}", array.0))
+                            .cloned()
+                            .unwrap_or_else(|| format!("unnamed_array_{}", array.0))
                     ),
                 );
                 let array_reg = self
@@ -392,7 +403,7 @@ impl Display for IrFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Function {:?}:", self.id)?;
         for instr in &self.code {
-            writeln!(f, "  {}", instr)?;
+            writeln!(f, "  {instr}")?;
         }
         Ok(())
     }
@@ -401,53 +412,47 @@ impl Display for IrFunction {
 impl Display for IrInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IrInstruction::Copy { target, source } => {
-                write!(f, "MOVE {:?} -> {:?}", source, target)
+            Self::Copy { target, source } => {
+                write!(f, "MOVE {source:?} -> {target:?}")
             }
-            IrInstruction::IndirectRead {
+            Self::IndirectRead {
                 base,
                 offset,
                 output,
             } => {
                 write!(
                     f,
-                    "INDIRECT_READ base: {:?}, offset: {:?} -> {:?}",
-                    base, offset, output
+                    "INDIRECT_READ base: {base:?}, offset: {offset:?} -> {output:?}"
                 )
             }
-            IrInstruction::IndirectWrite {
+            Self::IndirectWrite {
                 base,
                 offset,
                 value,
             } => {
                 write!(
                     f,
-                    "INDIRECT_WRITE base: {:?}, offset: {:?} <- {:?}",
-                    base, offset, value
+                    "INDIRECT_WRITE base: {base:?}, offset: {offset:?} <- {value:?}"
                 )
             }
-            IrInstruction::Call {
+            Self::Call {
                 function_id,
                 parameters,
                 output,
             } => {
-                write!(
-                    f,
-                    "CALL {:?}({:?}) -> {:?}",
-                    function_id, parameters, output
-                )
+                write!(f, "CALL {function_id:?}({parameters:?}) -> {output:?}")
             }
-            IrInstruction::Input { target } => {
-                write!(f, "INPUT -> {:?}", target)
+            Self::Input { target } => {
+                write!(f, "INPUT -> {target:?}")
             }
-            IrInstruction::Output { element } => {
-                write!(f, "OUTPUT <- {:?}", element)
+            Self::Output { element } => {
+                write!(f, "OUTPUT <- {element:?}")
             }
         }
     }
 }
 
-fn sanatize_string_literal(s: &str) -> String {
+fn sanitize_string_literal(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             '\n' => "\\n".to_string(),
@@ -462,74 +467,61 @@ fn sanatize_string_literal(s: &str) -> String {
 }
 
 impl IrInstruction {
+    #[must_use]
     pub fn display_with_reg_desc(
         &self,
         registers: &HashMap<IrRegisterId, IrRegister>,
         function_name_map: &HashMap<FunctionId, String>,
     ) -> String {
         match self {
-            IrInstruction::Copy { target, source } => {
+            Self::Copy { target, source } => {
                 let target_desc = registers
                     .get(target)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", target));
+                    .map_or_else(|| format!("{target:?}"), |r| r.description.clone());
                 let source_desc = match source {
                     IrCopyOperand::Register(reg_id) => registers
                         .get(reg_id)
-                        .map(|r| r.description.clone())
-                        .unwrap_or(format!("{:?}", reg_id)),
-                    IrCopyOperand::IntLiteral(int) => format!("IntLiteral({})", int),
+                        .map_or_else(|| format!("{reg_id:?}"), |r| r.description.clone()),
+                    IrCopyOperand::IntLiteral(int) => format!("IntLiteral({int})"),
                     IrCopyOperand::StringLiteral(s) => {
-                        format!("StringLiteral(\"{}\")", sanatize_string_literal(s))
+                        format!("StringLiteral(\"{}\")", sanitize_string_literal(s))
                     }
                 };
-                format!("MOVE {} -> {}", source_desc, target_desc)
+                format!("MOVE {source_desc} -> {target_desc}")
             }
-            IrInstruction::IndirectRead {
+            Self::IndirectRead {
                 base,
                 offset,
                 output,
             } => {
                 let base_desc = registers
                     .get(base)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", base));
+                    .map_or_else(|| format!("{base:?}"), |r| r.description.clone());
                 let offset_desc = registers
                     .get(offset)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", offset));
+                    .map_or_else(|| format!("{offset:?}"), |r| r.description.clone());
                 let output_desc = registers
                     .get(output)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", output));
-                format!(
-                    "INDIRECT_READ base: {}, offset: {} -> {}",
-                    base_desc, offset_desc, output_desc
-                )
+                    .map_or_else(|| format!("{output:?}"), |r| r.description.clone());
+                format!("INDIRECT_READ base: {base_desc}, offset: {offset_desc} -> {output_desc}")
             }
-            IrInstruction::IndirectWrite {
+            Self::IndirectWrite {
                 base,
                 offset,
                 value,
             } => {
                 let base_desc = registers
                     .get(base)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", base));
+                    .map_or_else(|| format!("{base:?}"), |r| r.description.clone());
                 let offset_desc = registers
                     .get(offset)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", offset));
+                    .map_or_else(|| format!("{offset:?}"), |r| r.description.clone());
                 let value_desc = registers
                     .get(value)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", value));
-                format!(
-                    "INDIRECT_WRITE base: {}, offset: {} <- {}",
-                    base_desc, offset_desc, value_desc
-                )
+                    .map_or_else(|| format!("{value:?}"), |r| r.description.clone());
+                format!("INDIRECT_WRITE base: {base_desc}, offset: {offset_desc} <- {value_desc}")
             }
-            IrInstruction::Call {
+            Self::Call {
                 function_id,
                 parameters,
                 output,
@@ -539,36 +531,33 @@ impl IrInstruction {
                     .map(|reg_id| {
                         registers
                             .get(reg_id)
-                            .map(|r| r.description.clone())
-                            .unwrap_or(format!("{:?}", reg_id))
+                            .map_or_else(|| format!("{reg_id:?}"), |r| r.description.clone())
                     })
                     .collect();
                 let output_desc = registers
                     .get(output)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", output));
+                    .map_or_else(|| format!("{output:?}"), |r| r.description.clone());
                 format!(
                     "CALL {:?}({}) -> {}",
                     function_name_map
                         .get(function_id)
-                        .unwrap_or(&format!("Function {}", function_id)),
+                        .cloned()
+                        .unwrap_or_else(|| format!("Function {function_id}")),
                     param_descs.join(", "),
                     output_desc
                 )
             }
-            IrInstruction::Input { target } => {
+            Self::Input { target } => {
                 let target_desc = registers
                     .get(target)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", target));
-                format!("INPUT -> {}", target_desc)
+                    .map_or_else(|| format!("{target:?}"), |r| r.description.clone());
+                format!("INPUT -> {target_desc}")
             }
-            IrInstruction::Output { element } => {
+            Self::Output { element } => {
                 let element_desc = registers
                     .get(element)
-                    .map(|r| r.description.clone())
-                    .unwrap_or(format!("{:?}", element));
-                format!("OUTPUT <- {}", element_desc)
+                    .map_or_else(|| format!("{element:?}"), |r| r.description.clone());
+                format!("OUTPUT <- {element_desc}")
             }
         }
     }

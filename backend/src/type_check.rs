@@ -83,29 +83,30 @@ pub enum TypedExpression {
     },
     FnCall {
         function: FunctionId,
-        arguments: Vec<TypedExpression>,
+        arguments: Vec<Self>,
         type_: Type,
     },
     ArrayAccess {
         array: VariableId,
-        index: Box<TypedExpression>,
+        index: Box<Self>,
         type_: Type,
     },
 }
 
 impl TypedExpression {
-    pub fn get_type(&self) -> Type {
+    #[must_use]
+    pub const fn get_type(&self) -> Type {
         match self {
-            TypedExpression::IntLiteral { type_, .. } => *type_,
-            TypedExpression::StringLiteral { type_, .. } => *type_,
-            TypedExpression::Variable { type_, .. } => *type_,
-            TypedExpression::FnCall { type_, .. } => *type_,
-            TypedExpression::ArrayAccess { type_, .. } => *type_,
+            Self::IntLiteral { type_, .. }
+            | Self::StringLiteral { type_, .. }
+            | Self::Variable { type_, .. }
+            | Self::FnCall { type_, .. }
+            | Self::ArrayAccess { type_, .. } => *type_,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Default)]
 pub enum Type {
     U8,
     I8,
@@ -122,15 +123,16 @@ pub enum Type {
 }
 
 impl Type {
+    #[must_use]
     pub fn size_in_bytes(&self) -> usize {
         match self {
-            Type::U8 | Type::I8 => 1,
-            Type::U16 | Type::I16 => 2,
-            Type::U32 | Type::I32 => 4,
-            Type::U64 | Type::I64 => 8,
-            Type::Str(len) => *len,
-            Type::Void => 0,
-            Type::Unknown => panic!("Cannot get size of unknown type"),
+            Self::U8 | Self::I8 => 1,
+            Self::U16 | Self::I16 => 2,
+            Self::U32 | Self::I32 => 4,
+            Self::U64 | Self::I64 => 8,
+            Self::Str(len) => *len,
+            Self::Void => 0,
+            Self::Unknown => panic!("Cannot get size of unknown type"),
         }
     }
 }
@@ -138,15 +140,15 @@ impl Type {
 impl From<ASTTypeKind> for Type {
     fn from(ast_type: ASTTypeKind) -> Self {
         match ast_type {
-            ASTTypeKind::U8 => Type::U8,
-            ASTTypeKind::I8 => Type::I8,
-            ASTTypeKind::U16 => Type::U16,
-            ASTTypeKind::I16 => Type::I16,
-            ASTTypeKind::U32 => Type::U32,
-            ASTTypeKind::I32 => Type::I32,
-            ASTTypeKind::U64 => Type::U64,
-            ASTTypeKind::I64 => Type::I64,
-            ASTTypeKind::Str(len) => Type::Str(len),
+            ASTTypeKind::U8 => Self::U8,
+            ASTTypeKind::I8 => Self::I8,
+            ASTTypeKind::U16 => Self::U16,
+            ASTTypeKind::I16 => Self::I16,
+            ASTTypeKind::U32 => Self::U32,
+            ASTTypeKind::I32 => Self::I32,
+            ASTTypeKind::U64 => Self::U64,
+            ASTTypeKind::I64 => Self::I64,
+            ASTTypeKind::Str(len) => Self::Str(len),
         }
     }
 }
@@ -226,7 +228,7 @@ fn type_annotate_function<Annotation: ASTAnnotation>(
 ) -> TypedFunction {
     let mut variable_info = HashMap::new();
 
-    for param in ast_function.params.iter() {
+    for param in &ast_function.params {
         variable_info.insert(
             param.variable_index,
             VariableInfo {
@@ -324,8 +326,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
             assert_eq!(
                 typed_value.get_type(),
                 var_type,
-                "Type mismatch in variable declaration for '{}'",
-                name
+                "Type mismatch in variable declaration for '{name}'"
             );
 
             TypedStatement::VarDecl {
@@ -352,8 +353,7 @@ fn type_annotate_statement<Annotation: ASTAnnotation>(
             assert_eq!(
                 typed_value.get_type(),
                 var_type,
-                "Type mismatch in assignment to variable {:?}",
-                var
+                "Type mismatch in assignment to variable {var:?}"
             );
 
             TypedStatement::Assignment {
@@ -456,9 +456,7 @@ fn type_annotate_expression<Annotation: ASTAnnotation>(
                 assert_eq!(
                     typed_arg.get_type(),
                     expected_type,
-                    "Type mismatch in argument {} of function call to '{}'",
-                    i,
-                    name
+                    "Type mismatch in argument {i} of function call to '{name}'"
                 );
             }
 

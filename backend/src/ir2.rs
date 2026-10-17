@@ -46,6 +46,7 @@ fn get_instruction_dependencies(instr: &IrInstruction) -> Vec<IrRegisterId> {
 }
 
 fn get_instruction_dependents(instr: &IrInstruction) -> Vec<IrRegisterId> {
+    #[allow(clippy::match_same_arms)]
     match instr {
         IrInstruction::Copy { target, source: _ } => vec![*target],
         IrInstruction::IndirectRead {
@@ -121,7 +122,7 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
     let max_instruction_length = function
         .code
         .iter()
-        .map(|instr| format!("{}", instr).len())
+        .map(|instr| format!("{instr}").len())
         .max()
         .unwrap_or(0);
     let general_lifetimes: HashMap<IrRegisterId, (usize, usize)> = register_usages
@@ -136,8 +137,8 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
     //start the main print loop
     for (index, instruction) in function.code.iter().enumerate() {
         //print out the actual instruction
-        let instr_str = format!("{}", instruction);
-        print!("{:width$}", instr_str, width = max_instruction_length);
+        let instr_str = format!("{instruction}");
+        print!("{instr_str:max_instruction_length$}");
 
         //now add additional padding
         print!("   ");
@@ -153,7 +154,7 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
                 print!(" ");
             } else {
                 //alive at this point
-                let events = &register_usages[reg_id];
+                let events = register_usages.get(reg_id).expect("register usage not found");
                 let mut event_str = String::new();
                 for event in events {
                     if event.instruction_index == index {
@@ -169,7 +170,7 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
                 if event_str.is_empty() {
                     event_str.push('|');
                 }
-                print!("{:}", event_str);
+                print!("{event_str:}");
             }
         }
         println!();
@@ -496,7 +497,7 @@ fn convert_instruction(
                         .expect("expected that param had proper register allocated");
                     let size = reg.size;
                     physical_space_allocator
-                        .allocate(size, format!("call_param_copy_tmp(param {})", i))
+                        .allocate(size, format!("call_param_copy_tmp(param {i})"))
                 })
                 .collect();
 
@@ -510,23 +511,35 @@ fn convert_instruction(
 
             let mut call_setup_code = vec![];
 
-            for (i, param) in parameters.iter().enumerate() {
+            assert!(
+                parameters.len() == param_locations.len(),
+                "parameter count mismatch"
+            );
 
+            assert!(
+                parameters.len() == tmp_param_locations.len(),
+                "parameter count mismatch"
+            );
+
+            for ((param, &tmp_location), &param_location) in parameters
+                .iter()
+                .zip(tmp_param_locations.iter())
+                .zip(param_locations.iter())
+            {
                 let param_ir2_reg = register_mapping
                     .get(param)
                     .expect("expected valid register mapping");
 
-                //we need to copy the values into the places specified by the function input layout starting at the new stack frame base
                 call_setup_code.extend(vec![
                     Ir2Instruction::Move {
-                        target: tmp_param_locations[i],
+                        target: tmp_location,
                         source: param_ir2_reg.location,
                     },
                     Ir2Instruction::NMove {
-                        targets: vec![param_locations[i], param_ir2_reg.location],
-                        source: tmp_param_locations[i],
+                        targets: vec![param_location, param_ir2_reg.location],
+                        source: tmp_location,
                     },
-                ])
+                ]);
             }
 
             let call_instruction = Ir2Instruction::Call {
@@ -738,6 +751,7 @@ fn convert_instruction(
     }
 }
 
+#[must_use]
 pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Function> {
     //first generate function metadata for all functions
     let mut global_function_metadata = HashMap::new();
@@ -782,109 +796,102 @@ pub fn generate_ir2(ir_functions: &Vec<IrFunction>) -> HashMap<FunctionId, Ir2Fu
 impl Display for Ir2Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Ir2Instruction::Clear { target } => {
-                write!(f, "CLEAR [SP + {}]", target)
+            Self::Clear { target } => {
+                write!(f, "CLEAR [SP + {target}]")
             }
-            Ir2Instruction::Init {
+            Self::Init {
                 target,
                 values: value,
             } => {
-                write!(f, "INIT [SP + {}] = {:?}", target, value)
+                write!(f, "INIT [SP + {target}] = {value:?}")
             }
-            Ir2Instruction::Move { target, source } => {
-                write!(f, "MOVE [SP + {}] <- [SP + {}]", target, source)
+            Self::Move { target, source } => {
+                write!(f, "MOVE [SP + {target}] <- [SP + {source}]")
             }
-            Ir2Instruction::NMove { targets, source } => {
+            Self::NMove { targets, source } => {
                 let target_strs: Vec<String> =
-                    targets.iter().map(|t| format!("[SP + {}]", t)).collect();
+                    targets.iter().map(|t| format!("[SP + {t}]")).collect();
                 write!(f, "NMOVE {} <- [SP + {}]", target_strs.join(", "), source)
             }
-            Ir2Instruction::MoveFromIndirect {
+            Self::MoveFromIndirect {
                 base,
                 offset,
                 output,
             } => {
                 write!(
                     f,
-                    "MOVE_FROM_INDIRECT [SP + {} + [SP + {}]] -> [SP + {}]",
-                    base, offset, output
+                    "MOVE_FROM_INDIRECT [SP + {base} + [SP + {offset}]] -> [SP + {output}]"
                 )
             }
-            Ir2Instruction::MoveFromIndirectConstant {
+            Self::MoveFromIndirectConstant {
                 base,
                 offset,
                 output,
             } => {
                 write!(
                     f,
-                    "MOVE_FROM_INDIRECT_CONST [SP + {} + {}] -> [SP + {}]",
-                    base, offset, output
+                    "MOVE_FROM_INDIRECT_CONST [SP + {base} + {offset}] -> [SP + {output}]",
                 )
             }
-            Ir2Instruction::MoveToIndirect {
+            Self::MoveToIndirect {
                 base,
                 offset,
                 value,
             } => {
                 write!(
                     f,
-                    "MOVE_TO_INDIRECT [SP + {} + [SP + {}]] <- [SP + {}]",
-                    base, offset, value
+                    "MOVE_TO_INDIRECT [SP + {base} + [SP + {offset}]] <- [SP + {value}]",
                 )
             }
-            Ir2Instruction::MoveToIndirectConstant {
+            Self::MoveToIndirectConstant {
                 base,
                 offset,
                 value,
             } => {
                 write!(
                     f,
-                    "MOVE_TO_INDIRECT_CONST [SP + {} + {}] <- [SP + {}]",
-                    base, offset, value
+                    "MOVE_TO_INDIRECT_CONST [SP + {base} + {offset}] <- [SP + {value}]",
                 )
             }
-            Ir2Instruction::ClearIndirect { base, offset } => {
-                write!(f, "CLEAR_INDIRECT [SP + {} + [SP + {}]]", base, offset)
+            Self::ClearIndirect { base, offset } => {
+                write!(f, "CLEAR_INDIRECT [SP + {base} + [SP + {offset}]]")
             }
-            Ir2Instruction::ClearIndirectConstant { base, offset } => {
-                write!(f, "CLEAR_INDIRECT_CONST [SP + {} + {}]", base, offset)
+            Self::ClearIndirectConstant { base, offset } => {
+                write!(f, "CLEAR_INDIRECT_CONST [SP + {base} + {offset}]")
             }
-            Ir2Instruction::ClearIndirectArray {
+            Self::ClearIndirectArray {
                 base,
                 offset,
                 element_size,
             } => {
                 write!(
                     f,
-                    "CLEAR_INDIRECT_CONST [SP + {} + {} * {}]",
-                    base, offset, element_size
+                    "CLEAR_INDIRECT_CONST [SP + {base} + {offset} * {element_size}]",
                 )
             }
-            Ir2Instruction::ClearIndirectArrayConstant {
+            Self::ClearIndirectArrayConstant {
                 base,
                 offset,
                 element_size,
             } => {
                 write!(
                     f,
-                    "CLEAR_INDIRECT_ARRAY_CONST [SP + {} + {} * {}]",
-                    base, offset, element_size
+                    "CLEAR_INDIRECT_ARRAY_CONST [SP + {base} + {offset} * {element_size}]",
                 )
             }
-            Ir2Instruction::Input { target } => {
-                write!(f, "INPUT [SP + {}]", target)
+            Self::Input { target } => {
+                write!(f, "INPUT [SP + {target}]")
             }
-            Ir2Instruction::Output { element } => {
-                write!(f, "OUTPUT [SP + {}]", element)
+            Self::Output { element } => {
+                write!(f, "OUTPUT [SP + {element}]")
             }
-            Ir2Instruction::Call {
+            Self::Call {
                 function_id,
                 new_stack_frame_base,
             } => {
                 write!(
                     f,
-                    "CALL FUNC_{} NEW_STACK_BASE [SP + {}]",
-                    function_id, new_stack_frame_base
+                    "CALL FUNC_{function_id} NEW_STACK_BASE [SP + {new_stack_frame_base}]",
                 )
             }
         }
@@ -898,13 +905,13 @@ mod tests {
     use crate::{ir::IrRegister, util::cartesian_product_iter};
 
     fn test_convert_ir(
-        original_ir: Vec<IrInstruction>,
-        register_mapping: HashMap<IrRegisterId, Ir2Register>,
-        registers: HashMap<IrRegisterId, IrRegister>,
+        original_ir: &[IrInstruction],
+        register_mapping: &HashMap<IrRegisterId, Ir2Register>,
+        registers: &HashMap<IrRegisterId, IrRegister>,
     ) -> Vec<Ir2Instruction> {
         let mut physical_space_allocator = PhysicalLocationAllocator::new();
 
-        for (reg_id, ir2_reg) in &register_mapping {
+        for (reg_id, ir2_reg) in register_mapping {
             let reg = registers
                 .get(reg_id)
                 .expect("expected valid register for register mapping");
@@ -957,7 +964,7 @@ mod tests {
                     },
                     &HashMap::new(),
                     &mut physical_space_allocator,
-                    &register_mapping,
+                    register_mapping,
                     old_instruction,
                 )
             })
@@ -996,8 +1003,9 @@ mod tests {
         };
         use maplit::hashmap;
 
-        fn test_ir2_init_int_literal(literal: IntLiteral, bytes: Vec<u8>) {
-            println!("Testing literal {:?} with bytes {:?}", literal, bytes);
+        #[allow(clippy::similar_names)]
+        fn test_ir2_init_int_literal(literal: IntLiteral, bytes: &[u8]) {
+            println!("Testing literal {literal:?} with bytes {bytes:?}");
 
             let ir_code = vec![IrInstruction::Copy {
                 target: IrRegisterId(0),
@@ -1017,73 +1025,70 @@ mod tests {
                 },
             };
 
-            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+            let ir2_code = test_convert_ir(&ir_code, &register_mapping, &registers);
 
             let expected_ir2_code = vec![Ir2Instruction::Init {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
-                values: bytes.clone(),
+                values: bytes.to_vec(),
             }];
 
             assert_eq!(ir2_code, expected_ir2_code);
 
             let start_tape = vec![];
-            let result_tape = test_instructions(ir2_code, start_tape);
+            let result_tape = test_instructions(&ir2_code, start_tape);
             test_tape_output_size(&result_tape, bytes.len());
             assert_eq!(result_tape[0..bytes.len()], bytes[..]);
         }
 
         #[test]
         fn u8() {
-            test_ir2_init_int_literal(IntLiteral::U8(42), (42u8).to_be_bytes().to_vec());
+            test_ir2_init_int_literal(IntLiteral::U8(42), &(42u8).to_be_bytes());
         }
 
         #[test]
         fn i8() {
-            test_ir2_init_int_literal(IntLiteral::I8(-73), (-73i8).to_be_bytes().to_vec());
+            test_ir2_init_int_literal(IntLiteral::I8(-73), &(-73i8).to_be_bytes());
         }
 
         #[test]
         fn u16() {
-            test_ir2_init_int_literal(IntLiteral::U16(0x1122), (0x1122u16).to_be_bytes().to_vec());
+            test_ir2_init_int_literal(IntLiteral::U16(0x1122), &(0x1122u16).to_be_bytes());
         }
 
         #[test]
         fn i16() {
-            test_ir2_init_int_literal(
-                IntLiteral::I16(-0x1234),
-                (-0x1234i16).to_be_bytes().to_vec(),
-            );
+            test_ir2_init_int_literal(IntLiteral::I16(-0x1234), &(-0x1234i16).to_be_bytes());
         }
 
         #[test]
         fn u32() {
             test_ir2_init_int_literal(
-                IntLiteral::U32(0x11223344),
-                (0x11223344u32).to_be_bytes().to_vec(),
+                IntLiteral::U32(0x1122_3344),
+                &(0x1122_3344u32).to_be_bytes(),
             );
         }
 
         #[test]
         fn i32() {
             test_ir2_init_int_literal(
-                IntLiteral::I32(-0x12345678),
-                (-0x12345678i32).to_be_bytes().to_vec(),
+                IntLiteral::I32(-0x1234_5678),
+                &(-0x1234_5678i32).to_be_bytes(),
             );
         }
 
         #[test]
         fn u64() {
             test_ir2_init_int_literal(
-                IntLiteral::U64(0x1122334455667788),
-                (0x1122334455667788u64).to_be_bytes().to_vec(),
+                IntLiteral::U64(0x1122_3344_5566_7788),
+                &(0x1122_3344_5566_7788u64).to_be_bytes(),
             );
         }
 
         #[test]
         fn i64() {
             test_ir2_init_int_literal(
-                IntLiteral::I64(-0x1234567890ABCDEF),
-                (-0x1234567890ABCDEFi64).to_be_bytes().to_vec(),
+                IntLiteral::I64(-0x1234_5678_90AB_CDEF),
+                &(-0x1234_5678_90AB_CDEFi64).to_be_bytes(),
             );
         }
     }
@@ -1100,7 +1105,8 @@ mod tests {
         };
         use maplit::hashmap;
 
-        fn test_ir2_init_string_literal(literal: &str, bytes: Vec<u8>) {
+        #[allow(clippy::similar_names)]
+        fn test_ir2_init_string_literal(literal: &str, bytes: &[u8]) {
             let ir_code = vec![IrInstruction::Copy {
                 target: IrRegisterId(0),
                 source: IrCopyOperand::StringLiteral(literal.to_string()),
@@ -1119,47 +1125,47 @@ mod tests {
                 },
             };
 
-            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+            let ir2_code = test_convert_ir(&ir_code, &register_mapping, &registers);
 
             let expected_ir2_code = vec![Ir2Instruction::Init {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), bytes.len()),
-                values: bytes.clone(),
+                values: bytes.to_vec(),
             }];
 
             assert_eq!(ir2_code, expected_ir2_code);
 
             let start_tape = vec![];
-            let result_tape = test_instructions(ir2_code, start_tape);
+            let result_tape = test_instructions(&ir2_code, start_tape);
             test_tape_output_size(&result_tape, bytes.len());
             assert_eq!(result_tape[0..bytes.len()], bytes[..]);
         }
 
         #[test]
         fn ascii() {
-            test_ir2_init_string_literal("hello", b"hello".to_vec());
+            test_ir2_init_string_literal("hello", b"hello");
         }
 
         #[test]
         fn zero_length() {
-            test_ir2_init_string_literal("", vec![]);
+            test_ir2_init_string_literal("", &[]);
         }
 
         #[test]
         fn special_characters() {
             let literal = "line1\nline2\t\\\"'";
-            test_ir2_init_string_literal(literal, literal.as_bytes().to_vec());
+            test_ir2_init_string_literal(literal, literal.as_bytes());
         }
 
         #[test]
         fn null_character_only() {
             let literal = "\0";
-            test_ir2_init_string_literal(literal, vec![0]);
+            test_ir2_init_string_literal(literal, &[0]);
         }
 
         #[test]
         fn embedded_null_character() {
             let literal = "ab\0cd";
-            test_ir2_init_string_literal(literal, vec![b'a', b'b', 0, b'c', b'd']);
+            test_ir2_init_string_literal(literal, &[b'a', b'b', 0, b'c', b'd']);
         }
     }
 
@@ -1176,7 +1182,8 @@ mod tests {
             ir2_runner::test_instructions,
         };
 
-        fn test_ir2_reg_reg_move(reg_size: usize, data: Vec<u8>) {
+        #[allow(clippy::similar_names)]
+        fn test_ir2_reg_reg_move(reg_size: usize, data: &[u8]) {
             assert_eq!(
                 reg_size,
                 data.len(),
@@ -1211,23 +1218,23 @@ mod tests {
                 },
             };
 
-            let ir2_code = test_convert_ir(ir_code, register_mapping, registers);
+            let ir2_code = test_convert_ir(&ir_code, &register_mapping, &registers);
 
             println!("Generated IR2 code:");
             for instr in &ir2_code {
-                println!("{}", instr);
+                println!("{instr}");
             }
             println!();
 
             let mut start_tape = vec![];
             //set the beggining of the tape to data
-            start_tape.extend(data.clone());
+            start_tape.extend(data);
 
-            let result_tape = test_instructions(ir2_code, start_tape);
+            let result_tape = test_instructions(&ir2_code, start_tape);
 
             test_tape_output_size(&result_tape, reg_size * 2);
 
-            println!("Result tape: {:?}", result_tape);
+            println!("Result tape: {result_tape:?}");
 
             //the source should be zeroed out
             assert_eq!(
@@ -1246,12 +1253,12 @@ mod tests {
 
         #[test]
         fn single_byte() {
-            test_ir2_reg_reg_move(1, vec![42]);
+            test_ir2_reg_reg_move(1, &[42]);
         }
 
         #[test]
         fn word() {
-            test_ir2_reg_reg_move(2, vec![0x12, 0x34]);
+            test_ir2_reg_reg_move(2, &[0x12, 0x34]);
         }
     }
 }

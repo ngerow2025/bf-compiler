@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    hash::BuildHasher,
     io::{self, Write},
 };
 
@@ -11,14 +12,14 @@ use crate::{
     util::{cartesian_product_iter, transpose},
 };
 
-struct Ir2GlobalContext<'a> {
+struct Ir2GlobalContext<'a, S: BuildHasher> {
     pub functions: Vec<&'a Ir2Function>,
-    pub function_name_mapping: HashMap<FunctionId, String>,
+    pub function_name_mapping: HashMap<FunctionId, String, S>,
 }
 
-pub fn run_ir2(
+pub fn run_ir2<S: BuildHasher>(
     ir_functions: Vec<&Ir2Function>,
-    function_name_mapping: HashMap<FunctionId, String>,
+    function_name_mapping: HashMap<FunctionId, String, S>,
 ) {
     let global_context = Ir2GlobalContext {
         functions: ir_functions,
@@ -42,7 +43,11 @@ pub fn run_ir2(
     }
 }
 
-fn run_function(function_id: FunctionId, global_context: &Ir2GlobalContext, mut memory: TapeView) {
+fn run_function<S: BuildHasher>(
+    function_id: FunctionId,
+    global_context: &Ir2GlobalContext<S>,
+    mut memory: TapeView,
+) {
     let function = global_context
         .functions
         .iter()
@@ -66,15 +71,13 @@ fn assert_offset_not_in_array_min_span(
     let array_range = PhysicalSlot::from_start_end_inclusive(base, resolved_address.get_end());
     assert!(
         !offset.intersects(&array_range),
-        "Offset location {:?} intersects with array range {:?} which is likely a bug",
-        offset,
-        array_range
+        "Offset location {offset:?} intersects with array range {array_range:?} which is likely a bug"
     );
 }
 
-fn run_instructions(
+fn run_instructions<S: BuildHasher>(
     instructions: &[Ir2Instruction],
-    global_context: &Ir2GlobalContext,
+    global_context: &Ir2GlobalContext<S>,
     memory: &mut TapeView,
 ) {
     for instruction in instructions {
@@ -182,13 +185,11 @@ fn run_instructions(
                 let targets = transpose(
                     targets
                         .iter()
-                        .map(|t| t.get_all_locations().to_vec())
+                        .map(PhysicalSlot::get_all_locations)
                         .collect(),
                 );
 
-                for (source_loc, target_locs) in
-                    source.get_all_locations().iter().zip(targets)
-                {
+                for (source_loc, target_locs) in source.get_all_locations().iter().zip(targets) {
                     let value = memory.read(*source_loc);
                     for target_loc in target_locs {
                         let prev_value = memory.read(target_loc);
@@ -325,7 +326,8 @@ fn run_instructions(
 }
 
 #[cfg(test)]
-pub fn test_instructions(instructions: Vec<Ir2Instruction>, start_tape: Vec<u8>) -> Vec<u8> {
+#[must_use]
+pub fn test_instructions(instructions: &[Ir2Instruction], start_tape: Vec<u8>) -> Vec<u8> {
     let global_context = Ir2GlobalContext {
         functions: vec![],
         function_name_mapping: HashMap::new(),
@@ -333,7 +335,7 @@ pub fn test_instructions(instructions: Vec<Ir2Instruction>, start_tape: Vec<u8>)
     let mut tape = Tape { data: start_tape };
     let mut tape_view = TapeView::new(&mut tape);
 
-    run_instructions(&instructions, &global_context, &mut tape_view);
+    run_instructions(instructions, &global_context, &mut tape_view);
     tape.data
 }
 
@@ -356,7 +358,7 @@ mod test {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
             }];
             let start_tape = vec![5, 10, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 10, 15]);
         }
 
@@ -366,7 +368,7 @@ mod test {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(1), 2),
             }];
             let start_tape = vec![5, 10, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![5, 0, 0]);
         }
 
@@ -376,7 +378,7 @@ mod test {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(1), 1),
             }];
             let start_tape = vec![5, 0, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![5, 0, 15]);
         }
 
@@ -386,7 +388,7 @@ mod test {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 2),
             }];
             let start_tape = vec![5, 0, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 15]);
         }
 
@@ -396,7 +398,7 @@ mod test {
                 target: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 3),
             }];
             let start_tape = vec![0, 0, 0, 2];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 0, 2]);
         }
     }
@@ -419,7 +421,7 @@ mod test {
                 values: vec![42],
             }];
             let start_tape = vec![0, 10, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![42, 10, 15]);
         }
 
@@ -430,7 +432,7 @@ mod test {
                 values: vec![42],
             }];
             let start_tape = vec![5, 10, 15];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![47, 10, 15]);
         }
 
@@ -441,7 +443,7 @@ mod test {
                 values: vec![1, 2, 3],
             }];
             let start_tape = vec![0, 0, 0, 98];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![1, 2, 3, 98]);
         }
 
@@ -452,7 +454,7 @@ mod test {
                 values: vec![1, 2, 3],
             }];
             let start_tape = vec![5, 10, 15, 98];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![6, 12, 18, 98]);
         }
 
@@ -463,7 +465,7 @@ mod test {
                 values: vec![1, 2, 3],
             }];
             let start_tape = vec![5, 0, 15, 98];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![6, 2, 18, 98]);
         }
     }
@@ -487,7 +489,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
             }];
             let start_tape = vec![5, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 5, 0]);
         }
 
@@ -498,7 +500,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
             }];
             let start_tape = vec![0, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 3]);
         }
 
@@ -509,7 +511,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
             }];
             let start_tape = vec![0, 98, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 98, 3]);
         }
 
@@ -520,7 +522,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
             }];
             let start_tape = vec![0, 0, 0, 0, 1, 2, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 1, 2, 3, 0, 0, 0]);
         }
 
@@ -531,7 +533,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
             }];
             let start_tape = vec![0, 0, 0, 0, 1, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 1, 0, 3, 0, 0, 0]);
         }
 
@@ -542,7 +544,7 @@ mod test {
                 source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
             }];
             let start_tape = vec![0, 8, 7, 6, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 8, 7, 6, 0, 0, 0]);
         }
     }
@@ -567,7 +569,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
                 }];
                 let start_tape = vec![5, 0, 0];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 5, 0]);
             }
 
@@ -578,7 +580,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
                 }];
                 let start_tape = vec![0, 0, 3];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 3]);
             }
 
@@ -589,7 +591,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(0), 1),
                 }];
                 let start_tape = vec![0, 98, 3];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 98, 3]);
             }
 
@@ -600,7 +602,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
                 }];
                 let start_tape = vec![0, 0, 0, 0, 1, 2, 3];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 1, 2, 3, 0, 0, 0]);
             }
 
@@ -611,7 +613,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
                 }];
                 let start_tape = vec![0, 0, 0, 0, 1, 0, 3];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 1, 0, 3, 0, 0, 0]);
             }
 
@@ -622,7 +624,7 @@ mod test {
                     source: PhysicalSlot::from_start_size(PhysicalLocation::new(4), 3),
                 }];
                 let start_tape = vec![0, 8, 7, 6, 0, 0, 0];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 8, 7, 6, 0, 0, 0]);
             }
         }
@@ -644,7 +646,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![1, 2, 3, 4, 5, 6];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 3, 4, 4, 5, 6]);
             }
 
@@ -658,7 +660,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![0, 2, 3, 4, 5, 6];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 2, 3, 4, 5, 6]);
             }
 
@@ -672,7 +674,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![1, 0, 0, 4, 5, 6];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 1, 1, 4, 5, 6]);
             }
 
@@ -686,7 +688,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 0, 5, 7, 9, 8, 10, 12]);
             }
 
@@ -700,7 +702,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![0, 0, 0, 4, 5, 6, 7, 8, 9];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 0, 4, 5, 6, 7, 8, 9]);
             }
 
@@ -714,7 +716,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![1, 2, 3, 0, 0, 0, 0, 0, 0];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 0, 1, 2, 3, 1, 2, 3]);
             }
 
@@ -728,7 +730,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![1, 0, 3, 4, 5, 6, 7, 8, 9];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 0, 5, 5, 9, 8, 8, 12]);
             }
 
@@ -742,7 +744,7 @@ mod test {
                     ],
                 }];
                 let start_tape = vec![0, 0, 0, 0, 0, 0, 0, 0, 0];
-                let result_tape = test_instructions(instructions, start_tape);
+                let result_tape = test_instructions(&instructions, start_tape);
                 assert_eq!(result_tape, vec![0, 0, 0, 0, 0, 0, 0, 0, 0]);
             }
         }
@@ -771,7 +773,7 @@ mod test {
             // offset at 0 is 2. base is 4. source = 4 + 2 = 6.
             // target at 1 is 0. source at 6 is 5.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6 is cleared, target at 1 gets 5 added to it.
             assert_eq!(result_tape, vec![2, 5, 0, 0, 0, 0, 0]);
         }
@@ -786,7 +788,7 @@ mod test {
             // offset at 0 is 2. base is 4. source = 4 + 2 = 6.
             // target at 1 is 3. source at 6 is 5.
             let start_tape = vec![2, 3, 0, 0, 0, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6 is cleared, target at 1 gets 5 added to it (3 + 5 = 8).
             assert_eq!(result_tape, vec![2, 8, 0, 0, 0, 0, 0]);
         }
@@ -800,7 +802,7 @@ mod test {
             }];
             // target at 1 is 0. source at 6 is 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -813,7 +815,7 @@ mod test {
             }];
             // target at 1 is 3. source at 6 is 0.
             let start_tape = vec![2, 3, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 3, 0, 0, 0, 0, 0]);
         }
 
@@ -828,7 +830,7 @@ mod test {
             // target at 1 is size 3 (values 0, 0, 0).
             // source at 6 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 0, 0, 0, 0, 0, 10, 20, 30];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6, 7, 8 is cleared, targets at 1, 2, 3 receive the values.
             assert_eq!(result_tape, vec![2, 10, 20, 30, 0, 0, 0, 0, 0]);
         }
@@ -843,7 +845,7 @@ mod test {
             // target at 1 is size 3 (values 5, 0, 5).
             // source at 6 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 5, 0, 5, 0, 0, 10, 20, 30];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Adds values to target and clears source
             assert_eq!(result_tape, vec![2, 15, 20, 35, 0, 0, 0, 0, 0]);
         }
@@ -858,7 +860,7 @@ mod test {
             // target at 1 is size 3 (values 5, 6, 7).
             // source at 6 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 5, 6, 7, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 5, 6, 7, 0, 0, 0, 0, 0]);
         }
     }
@@ -886,7 +888,7 @@ mod test {
             // base is 4. offset is 2. source = 4 + 2 = 6.
             // target at 1 is 0. source at 6 is 5.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6 is cleared, target at 1 gets 5 added to it.
             assert_eq!(result_tape, vec![2, 5, 0, 0, 0, 0, 0]);
         }
@@ -901,7 +903,7 @@ mod test {
             // base is 4. offset is 2. source = 4 + 2 = 6.
             // target at 1 is 3. source at 6 is 5.
             let start_tape = vec![2, 3, 0, 0, 0, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6 is cleared, target at 1 gets 5 added to it (3 + 5 = 8).
             assert_eq!(result_tape, vec![2, 8, 0, 0, 0, 0, 0]);
         }
@@ -915,7 +917,7 @@ mod test {
             }];
             // target at 1 is 0. source at 6 is 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -928,7 +930,7 @@ mod test {
             }];
             // target at 1 is 3. source at 6 is 0.
             let start_tape = vec![2, 3, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 3, 0, 0, 0, 0, 0]);
         }
 
@@ -943,7 +945,7 @@ mod test {
             // target at 1 is size 3 (values 0, 0, 0).
             // source at 6 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 0, 0, 0, 0, 0, 10, 20, 30];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 6, 7, 8 is cleared, targets at 1, 2, 3 receive the values.
             assert_eq!(result_tape, vec![2, 10, 20, 30, 0, 0, 0, 0, 0]);
         }
@@ -958,7 +960,7 @@ mod test {
             // target at 1 is size 3 (values 5, 0, 5).
             // source at 6 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 5, 0, 5, 0, 0, 10, 20, 30];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Adds values to target and clears source
             assert_eq!(result_tape, vec![2, 15, 20, 35, 0, 0, 0, 0, 0]);
         }
@@ -973,7 +975,7 @@ mod test {
             // target at 1 is size 3 (values 5, 6, 7).
             // source at 6 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 5, 6, 7, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 5, 6, 7, 0, 0, 0, 0, 0]);
         }
     }
@@ -1001,7 +1003,7 @@ mod test {
             // offset at 0 is 2. base is 4. target = 4 + 2 = 6.
             // source at 1 is 5. target at 6 is 0.
             let start_tape = vec![2, 5, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1 is cleared, target at 6 gets 5 added to it.
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 5]);
         }
@@ -1016,7 +1018,7 @@ mod test {
             // offset at 0 is 2. base is 4. target = 4 + 2 = 6.
             // source at 1 is 5. target at 6 is 3.
             let start_tape = vec![2, 5, 0, 0, 0, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1 is cleared, target at 6 gets 5 added to it (3 + 5 = 8).
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 8]);
         }
@@ -1030,7 +1032,7 @@ mod test {
             }];
             // source at 1 is 0. target at 6 is 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1043,7 +1045,7 @@ mod test {
             }];
             // source at 1 is 0. target at 6 is 3.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 3]);
         }
 
@@ -1058,7 +1060,7 @@ mod test {
             // source at 1 is size 3 (values 10, 20, 30).
             // target at 8 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1, 2, 3 is cleared, targets at 8, 9, 10 receive the values.
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30]);
         }
@@ -1073,7 +1075,7 @@ mod test {
             // target at 8 is size 3 (values 5, 0, 5).
             // source at 1 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 10, 20, 30, 0, 0, 0, 0, 5, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Adds values to target and clears source
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 15, 20, 35]);
         }
@@ -1088,7 +1090,7 @@ mod test {
             // target at 8 is size 3 (values 5, 6, 7).
             // source at 1 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0, 0, 5, 6, 7];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 5, 6, 7]);
         }
     }
@@ -1116,7 +1118,7 @@ mod test {
             // base is 4. offset is 2. target = 4 + 2 = 6.
             // source at 1 is 5. target at 6 is 0.
             let start_tape = vec![2, 5, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1 is cleared, target at 6 gets 5 added to it.
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 5]);
         }
@@ -1131,7 +1133,7 @@ mod test {
             // base is 4. offset is 2. target = 4 + 2 = 6.
             // source at 1 is 5. target at 6 is 3.
             let start_tape = vec![2, 5, 0, 0, 0, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1 is cleared, target at 6 gets 5 added to it (3 + 5 = 8).
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 8]);
         }
@@ -1145,7 +1147,7 @@ mod test {
             }];
             // source at 1 is 0. target at 6 is 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1158,7 +1160,7 @@ mod test {
             }];
             // source at 1 is 0. target at 6 is 3.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 3];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 3]);
         }
 
@@ -1173,7 +1175,7 @@ mod test {
             // source at 1 is size 3 (values 10, 20, 30).
             // target at 8 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Source at 1, 2, 3 is cleared, targets at 8, 9, 10 receive the values.
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 10, 20, 30]);
         }
@@ -1188,7 +1190,7 @@ mod test {
             // target at 8 is size 3 (values 5, 0, 5).
             // source at 1 is size 3 (values 10, 20, 30).
             let start_tape = vec![2, 10, 20, 30, 0, 0, 0, 0, 5, 0, 5];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // Adds values to target and clears source
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 15, 20, 35]);
         }
@@ -1203,7 +1205,7 @@ mod test {
             // target at 8 is size 3 (values 5, 6, 7).
             // source at 1 is size 3 (values 0, 0, 0).
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0, 0, 5, 6, 7];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0, 5, 6, 7]);
         }
     }
@@ -1229,7 +1231,7 @@ mod test {
             // offset at 0 is 2. base is 4. target = 4 + 2 = 6.
             // target at 6 is 5, should be cleared to 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 5, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1242,7 +1244,7 @@ mod test {
             // offset at 0 is 2. base is 4. target = 4 + 2 = 6.
             // target at 6 is already 0.
             let start_tape = vec![2, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![2, 0, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1255,7 +1257,7 @@ mod test {
             // offset at 0 is 0. base is 4. target = 4 + 0 = 4.
             // target at 4 is 9.
             let start_tape = vec![0, 0, 0, 0, 9, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 0, 0, 0, 0, 0, 0]);
         }
     }
@@ -1280,7 +1282,7 @@ mod test {
             // base is 4. offset is 2. target = 4 + 2 = 6.
             // target at 6 is 5, should be cleared to 0.
             let start_tape = vec![0, 0, 0, 0, 0, 0, 5, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1292,7 +1294,7 @@ mod test {
             }];
             // target at 6 is already 0.
             let start_tape = vec![0, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 0, 0, 0, 0, 0, 0]);
         }
 
@@ -1304,7 +1306,7 @@ mod test {
             }];
             // target = 4 + 0 = 4. target at 4 is 9.
             let start_tape = vec![0, 0, 0, 0, 9, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(result_tape, vec![0, 0, 0, 0, 0, 0, 0, 0]);
         }
     }
@@ -1333,7 +1335,7 @@ mod test {
             // target array starts at 5 + (2 * 3) = 11.
             // values at 11, 12, 13 are [7, 8, 9].
             let start_tape = vec![2, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 7, 8, 9, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // target array should be cleared.
             assert_eq!(
                 result_tape,
@@ -1350,7 +1352,7 @@ mod test {
             }];
             // target array starts at 11. already 0.
             let start_tape = vec![2, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(
                 result_tape,
                 vec![2, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -1367,7 +1369,7 @@ mod test {
             // offset at 0 is 0. target array starts at 5 + (0 * 3) = 5.
             // values at 5, 6, 7 are [10, 20, 30].
             let start_tape = vec![0, 0, 0, 0, 0, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(
                 result_tape,
                 vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -1398,7 +1400,7 @@ mod test {
             // target array starts at 5 + (2 * 3) = 11.
             // values at 11, 12, 13 are [7, 8, 9].
             let start_tape = vec![0, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 7, 8, 9, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             // target array should be cleared.
             assert_eq!(
                 result_tape,
@@ -1415,7 +1417,7 @@ mod test {
             }];
             // target array starts at 11. already 0.
             let start_tape = vec![0, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(
                 result_tape,
                 vec![0, 0, 0, 0, 0, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -1432,7 +1434,7 @@ mod test {
             // offset is 0. target array starts at 5 + (0 * 3) = 5.
             // values at 5, 6, 7 are [10, 20, 30].
             let start_tape = vec![0, 0, 0, 0, 0, 10, 20, 30, 0, 0, 0, 0, 0, 0, 0];
-            let result_tape = test_instructions(instructions, start_tape);
+            let result_tape = test_instructions(&instructions, start_tape);
             assert_eq!(
                 result_tape,
                 vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

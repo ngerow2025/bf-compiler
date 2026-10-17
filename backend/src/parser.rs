@@ -15,7 +15,7 @@ use crate::tokenizer::{Locatable, Token};
 
 // Parameter struct definitions
 
-#[derive(Debug, PartialEq, Clone, Default, Error, Diagnostic, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum ParsingErrorKind {
     #[error("Unexpected token: expected {expected:?}, found {found:?}")]
     WrongToken { expected: Token, found: Token },
@@ -50,7 +50,7 @@ pub enum ParsingErrorKind {
     Other,
 }
 
-#[derive(Debug, Diagnostic, PartialEq, Clone)]
+#[derive(Debug, Diagnostic, PartialEq, Eq, Clone)]
 pub struct ParsingError {
     #[source_code]
     pub src: NamedSource<String>,
@@ -77,7 +77,7 @@ impl Serialize for ParsingError {
     }
 }
 
-#[derive(Debug, Diagnostic, PartialEq, Clone, Error, Serialize)]
+#[derive(Debug, Diagnostic, PartialEq, Eq, Clone, Error, Serialize)]
 #[error("Parsing pass failed with {} error(s)", errors.len())]
 pub struct ParsingErrorCollection {
     #[related]
@@ -96,7 +96,7 @@ impl From<ParsingError> for ParsingErrorCollection {
 
 impl Default for ParsingError {
     fn default() -> Self {
-        ParsingError {
+        Self {
             src: NamedSource::new("input", String::new()),
             span: SourceSpan::new(0.into(), 0),
             kind: ParsingErrorKind::Other,
@@ -201,14 +201,14 @@ pub enum IntLiteral {
 impl Display for IntLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            IntLiteral::U8(v) => write!(f, "{}u8", v),
-            IntLiteral::I8(v) => write!(f, "{}i8", v),
-            IntLiteral::U16(v) => write!(f, "{}u16", v),
-            IntLiteral::I16(v) => write!(f, "{}i16", v),
-            IntLiteral::U32(v) => write!(f, "{}u32", v),
-            IntLiteral::I32(v) => write!(f, "{}i32", v),
-            IntLiteral::U64(v) => write!(f, "{}u64", v),
-            IntLiteral::I64(v) => write!(f, "{}i64", v),
+            Self::U8(v) => write!(f, "{v}u8"),
+            Self::I8(v) => write!(f, "{v}i8"),
+            Self::U16(v) => write!(f, "{v}u16"),
+            Self::I16(v) => write!(f, "{v}i16"),
+            Self::U32(v) => write!(f, "{v}u32"),
+            Self::I32(v) => write!(f, "{v}i32"),
+            Self::U64(v) => write!(f, "{v}u64"),
+            Self::I64(v) => write!(f, "{v}i64"),
         }
     }
 }
@@ -239,25 +239,25 @@ pub enum Expression<Annotation: ASTAnnotation> {
     },
     ArrayAccess {
         array: VariableAccess<Annotation>,
-        index_expr: Box<Expression<Annotation>>,
+        index_expr: Box<Self>,
         annotation: Annotation::ExpressionAnnotation,
     },
     FnCall {
         qualified_name: QualifiedName<Annotation>,
-        arguments: Vec<Expression<Annotation>>,
+        arguments: Vec<Self>,
         annotation: Annotation::ExpressionAnnotation,
     },
 }
 
 impl<Annotation: ASTAnnotation> Expression<Annotation> {
-    pub fn annotation(&self) -> &Annotation::ExpressionAnnotation {
+    pub const fn annotation(&self) -> &Annotation::ExpressionAnnotation {
         match self {
-            Expression::IntLiteral { annotation, .. } => annotation,
-            Expression::StringLiteral { annotation, .. } => annotation,
-            Expression::CharLiteral { annotation, .. } => annotation,
-            Expression::VariableAccess { annotation, .. } => annotation,
-            Expression::ArrayAccess { annotation, .. } => annotation,
-            Expression::FnCall { annotation, .. } => annotation,
+            Self::IntLiteral { annotation, .. }
+            | Self::StringLiteral { annotation, .. }
+            | Self::CharLiteral { annotation, .. }
+            | Self::VariableAccess { annotation, .. }
+            | Self::ArrayAccess { annotation, .. }
+            | Self::FnCall { annotation, .. } => annotation,
         }
     }
 }
@@ -329,7 +329,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             Some(SourceCodeOrigin::File(filename)) => NamedSource::new(
                 filename.to_string(),
                 std::fs::read_to_string(&**filename)
-                    .unwrap_or_else(|_| format!("Could not read source file: {}", filename)),
+                    .unwrap_or_else(|_| format!("Could not read source file: {filename}")),
             ),
             Some(SourceCodeOrigin::Anon(code)) => NamedSource::new("anonymous", code.to_string()),
             None => NamedSource::new("input", String::new()),
@@ -530,34 +530,16 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn parse_statement(&mut self) -> ParseResult<Statement<Annotation>> {
-        let token = self.peek().ok_or(ParsingError {
+        let token = self.peek().ok_or_else(|| ParsingError {
             src: NamedSource::new("input", String::new()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
         })?;
         match &token.value {
             Token::Let => self.parse_var_decl(),
-            Token::Identifier(_) => {
-                // Could be Assignment or expression
-                // We need to look ahead 1 token
-                match self.peek2().map(|t| &t.value) {
-                    Some(Token::Equals) => self.parse_assignment(),
-                    _ => {
-                        let parsed_expr = self.parse_expression()?;
-                        let semicolon_token = self.expect(Token::Semicolon)?;
-                        let annotation = Annotation::construct_expression_statement_annotation(
-                            self.annotation_processor,
-                            ast_annotation::ConstructExpressionStatementAnnotationParams {
-                                expr: &parsed_expr,
-                                semicolon_token: &semicolon_token,
-                            },
-                        );
-                        Ok(Statement::Expression {
-                            expr: parsed_expr,
-                            annotation,
-                        })
-                    }
-                }
+            // Could be Assignment or expression if there is an identifier, need to peek ahead
+            Token::Identifier(_) if self.peek2().map(|t| &t.value) == Some(&Token::Equals) => {
+                self.parse_assignment()
             }
             _ => {
                 let parsed_expr = self.parse_expression()?;
@@ -579,13 +561,13 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
     fn parse_var_decl(&mut self) -> ParseResult<Statement<Annotation>> {
         // Grammar: "let" ID ":" Type "=" Expression ";"
-        let let_token = self.advance().ok_or(ParsingError {
+        let let_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
         })?;
 
-        let identifier_token = self.advance().ok_or(ParsingError {
+        let identifier_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -622,7 +604,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 return Err(ParsingError {
                     src: Self::source_for_token(&identifier_token),
                     span: identifier_token.loc.span,
-                    kind: ParsingErrorKind::VariableAlreadyDeclared { name: name.clone() },
+                    kind: ParsingErrorKind::VariableAlreadyDeclared { name },
                 }
                 .into());
             }
@@ -662,7 +644,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
     fn parse_assignment(&mut self) -> ParseResult<Statement<Annotation>> {
         // Grammar: ID "=" Expression ";"
-        let identifier_token = self.advance().ok_or(ParsingError {
+        let identifier_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -695,7 +677,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 break;
             }
         }
-        let var_index = found_index.ok_or(ParsingError {
+        let var_index = found_index.ok_or_else(|| ParsingError {
             src: Self::source_for_token(&identifier_token),
             span: identifier_token.loc.span,
             kind: ParsingErrorKind::VariableNotDeclared { name: name.clone() },
@@ -764,7 +746,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         let mut identifier_tokens = Vec::new();
         let mut double_colon_tokens = Vec::new();
 
-        let first_token = self.advance().ok_or(ParsingError {
+        let first_token = self.advance().ok_or_else(|| ParsingError {
             src: NamedSource::new("input", String::new()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -788,7 +770,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         while self.peek().map(|t| &t.value) == Some(&Token::DoubleColon) {
             let double_colon_token = self.advance().unwrap();
 
-            let next_token = self.advance().ok_or(ParsingError {
+            let next_token = self.advance().ok_or_else(|| ParsingError {
                 src: Self::source_for_token(&double_colon_token),
                 span: double_colon_token.loc.span,
                 kind: ParsingErrorKind::UnexpectedEOF,
@@ -829,7 +811,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
     // Returns the AST node AND its resolved type
     fn parse_expression(&mut self) -> ParseResult<Expression<Annotation>> {
-        let token = self.peek().ok_or(ParsingError {
+        let token = self.peek().ok_or_else(|| ParsingError {
             src: NamedSource::new("input", String::new()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -841,7 +823,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             Token::Identifier(_) => {
                 // could be a several different things
                 match self.peek2().map(|t| &t.value) {
-                    Some(Token::LParen) | Some(Token::DoubleColon) => self.parse_function_call(),
+                    Some(Token::LParen | Token::DoubleColon) => self.parse_function_call(),
                     Some(Token::LSquare) => self.parse_array_access(),
                     _ => {
                         let var = self.parse_variable_access()?;
@@ -872,7 +854,6 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn int_parse_error_message(
-        &self,
         type_: &ASTTypeNode<Annotation>,
         parse_error: &std::num::ParseIntError,
     ) -> String {
@@ -913,22 +894,18 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         };
 
         match parse_error.kind() {
-            IntErrorKind::Empty => format!(
-                "Cannot parse integer literal: empty string cannot be parsed as {}",
-                int_str
-            ),
-            IntErrorKind::InvalidDigit => format!(
-                "Cannot parse integer literal: invalid digit for type {}",
-                int_str
-            ),
-            IntErrorKind::PosOverflow => format!(
-                "Cannot parse integer literal: value too large for type {}",
-                int_str
-            ),
-            IntErrorKind::NegOverflow => format!(
-                "Cannot parse integer literal: value too small for type {}",
-                int_str
-            ),
+            IntErrorKind::Empty => {
+                format!("Cannot parse integer literal: empty string cannot be parsed as {int_str}")
+            }
+            IntErrorKind::InvalidDigit => {
+                format!("Cannot parse integer literal: invalid digit for type {int_str}")
+            }
+            IntErrorKind::PosOverflow => {
+                format!("Cannot parse integer literal: value too large for type {int_str}")
+            }
+            IntErrorKind::NegOverflow => {
+                format!("Cannot parse integer literal: value too small for type {int_str}")
+            }
             IntErrorKind::Zero => {
                 unreachable!("There is no non-zero types parsed for integer literals")
             }
@@ -937,7 +914,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn parse_int_literal(&mut self) -> ParseResult<Expression<Annotation>> {
-        let int_token = self.advance().ok_or(ParsingError {
+        let int_token = self.advance().ok_or_else(|| ParsingError {
             src: NamedSource::new("input", String::new()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -958,10 +935,11 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
         };
 
         let type_token = self.parse_type()?;
-
+        #[allow(clippy::match_wildcard_for_single_variants)]
+        //there will be more other types in the future
         let parsed_value = match &type_token.kind {
             ASTTypeKind::U8 => IntLiteral::U8(int_value.parse::<u8>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -971,7 +949,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::I8 => IntLiteral::I8(int_value.parse::<i8>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -981,7 +959,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::U16 => IntLiteral::U16(int_value.parse::<u16>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -991,7 +969,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::I16 => IntLiteral::I16(int_value.parse::<i16>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1001,7 +979,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::U32 => IntLiteral::U32(int_value.parse::<u32>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1011,7 +989,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::I32 => IntLiteral::I32(int_value.parse::<i32>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1021,7 +999,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::U64 => IntLiteral::U64(int_value.parse::<u64>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1031,7 +1009,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
                 }
             })?),
             ASTTypeKind::I64 => IntLiteral::I64(int_value.parse::<i64>().map_err(|e| {
-                let error_message = self.int_parse_error_message(&type_token, &e);
+                let error_message = Self::int_parse_error_message(&type_token, &e);
                 ParsingError {
                     src: Self::source_for_token(&int_token),
                     span: int_token.loc.span,
@@ -1066,7 +1044,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn parse_string_literal(&mut self) -> ParseResult<Expression<Annotation>> {
-        let str_token = self.advance().ok_or(ParsingError {
+        let str_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -1100,7 +1078,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn parse_char_literal(&mut self) -> ParseResult<Expression<Annotation>> {
-        let char_token = self.advance().ok_or(ParsingError {
+        let char_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -1163,7 +1141,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
 
     fn parse_variable_access(&mut self) -> ParseResult<VariableAccess<Annotation>> {
         // Grammar: ID
-        let name_token = self.advance().ok_or(ParsingError {
+        let name_token = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -1192,7 +1170,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             }
         }
 
-        let var_index = found_index.ok_or(ParsingError {
+        let var_index = found_index.ok_or_else(|| ParsingError {
             src: Self::source_for_token(&name_token),
             span: name_token.loc.span,
             kind: ParsingErrorKind::VariableNotDeclared { name: name.clone() },
@@ -1212,7 +1190,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
     }
 
     fn parse_type(&mut self) -> ParseResult<ASTTypeNode<Annotation>> {
-        let t = self.advance().ok_or(ParsingError {
+        let t = self.advance().ok_or_else(|| ParsingError {
             src: Self::source_for_token(self.last().unwrap()),
             span: self.last().unwrap().loc.span,
             kind: ParsingErrorKind::UnexpectedEOF,
@@ -1325,7 +1303,7 @@ impl<'a, Annotation: ASTAnnotation> Parser<'a, Annotation> {
             Token::TypeStr => {
                 // Format: str<INT>
                 let left_angle = self.expect(Token::LAngle)?;
-                let size_token = self.advance().ok_or(ParsingError {
+                let size_token = self.advance().ok_or_else(|| ParsingError {
                     src: Self::source_for_token(self.last().unwrap()),
                     span: self.last().unwrap().loc.span,
                     kind: ParsingErrorKind::UnexpectedEOF,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miette::SourceSpan;
 use serde::Serialize;
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub struct SourceLocation {
     pub span: SourceSpan,
     #[serde(skip)]
@@ -11,7 +11,7 @@ pub struct SourceLocation {
 }
 
 impl SourceLocation {
-    pub fn superset<'a>(elements: impl IntoIterator<Item = &'a SourceLocation>) -> SourceLocation {
+    pub fn superset<'a>(elements: impl IntoIterator<Item = &'a Self>) -> Self {
         let elements: Vec<_> = elements.into_iter().collect();
         let mut begining = elements
             .first()
@@ -34,7 +34,7 @@ impl SourceLocation {
                 end = element_end;
             }
         }
-        SourceLocation {
+        Self {
             span: SourceSpan::new(begining.into(), end - begining),
             origin: elements
                 .first()
@@ -45,7 +45,7 @@ impl SourceLocation {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SourceCodeOrigin {
     File(Arc<String>), //String contains the file path
     Anon(Arc<String>), //String contains the code itself

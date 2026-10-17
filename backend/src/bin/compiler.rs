@@ -69,7 +69,8 @@ fn main() -> Result<()> {
             "IR for function {}:",
             function_name_mapping
                 .get(&ir_function.id)
-                .unwrap_or(&format!("Function {}", ir_function.id))
+                .cloned()
+                .unwrap_or_else(|| format!("Function {}", ir_function.id))
         );
         for instruction in &ir_function.code {
             println!(
@@ -98,14 +99,11 @@ fn main() -> Result<()> {
 
     if cli.run {
         println!("Running IR2... -----------------------");
-        run_ir2(
-            generated_ir2.values().collect(),
-            function_name_mapping.clone(),
-        );
+        run_ir2(generated_ir2.values().collect(), function_name_mapping);
         println!("Finished running IR2. -----------------------\n");
     }
 
-    let generated_bf = BfGenerator::ucodegen_program(generated_ir2);
+    let generated_bf = BfGenerator::ucodegen_program(&generated_ir2);
 
     let final_bf_code = codegen_program(generated_bf, entry_point);
 
@@ -118,7 +116,7 @@ fn main() -> Result<()> {
     let output_file = format!("{}.bf", cli.output_file);
     let bf_code_string: String = final_bf_code
         .iter()
-        .map(|instr| instr.to_string())
+        .map(ToString::to_string)
         .collect::<String>();
     std::fs::write(&output_file, bf_code_string).expect("Failed to write output file");
     // println!("Generated Brainfuck code written to {}", output_file);

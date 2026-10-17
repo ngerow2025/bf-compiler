@@ -12,6 +12,7 @@ pub struct RawModeGuard {
 }
 
 impl RawModeGuard {
+    #[must_use]
     pub fn new() -> Self {
         enable_raw_mode().expect("failed to enable raw mode");
 
@@ -47,6 +48,7 @@ impl Drop for RawModeGuard {
     }
 }
 
+#[must_use]
 pub fn read_single_byte() -> u8 {
     loop {
         let event = read().expect("failed to read terminal input event");
@@ -60,7 +62,7 @@ pub fn read_single_byte() -> u8 {
                 KeyCode::Enter => return b'\n',
                 KeyCode::Tab => return b'\t',
                 KeyCode::Backspace => return 8,
-                _ => continue,
+                _ => {}
             }
         }
     }
