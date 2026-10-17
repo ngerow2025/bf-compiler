@@ -12,8 +12,11 @@ wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 serde-wasm-bindgen = "0.6.5"
 serde = { version = "1.0.228", features = ["derive"] }
-crossterm = "0.29"
+crossterm = { version = "0.29", optional = true }
 maplit = "1.0.2"
+
+[features]
+advanced-output = ["crossterm"]
 
 [patch.crates-io]
 miette = { path = "../3rd_party/miette" }

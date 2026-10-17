@@ -154,7 +154,9 @@ pub fn print_instruction_with_lifetime_annotations(function: &IrFunction) {
                 print!(" ");
             } else {
                 //alive at this point
-                let events = register_usages.get(reg_id).expect("register usage not found");
+                let events = register_usages
+                    .get(reg_id)
+                    .expect("register usage not found");
                 let mut event_str = String::new();
                 for event in events {
                     if event.instruction_index == index {

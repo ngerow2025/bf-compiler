@@ -1,21 +1,30 @@
+#[cfg(feature = "advanced-output")]
 use std::io::{self, Write};
 
+#[cfg(feature = "advanced-output")]
 use compiler_bf_target::input_grabbing::{RawModeGuard, read_single_byte};
 
 fn main() {
-    //take in bf code from an input
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+    #[cfg(feature = "advanced-output")]
+    {
+        //take in bf code from an input
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
 
-    let mut bf_runner = BfInterpreter::new();
-    bf_runner.run(&input);
+        let mut bf_runner = BfInterpreter::new();
+        bf_runner.run(&input);
+    }
+    #[cfg(not(feature = "advanced-output"))]
+    println!("Advanced output feature is not enabled");
 }
 
+#[cfg(feature = "advanced-output")]
 struct BfInterpreter {
     tape: Box<[u8]>,
     pointer: usize,
 }
 
+#[cfg(feature = "advanced-output")]
 impl BfInterpreter {
     fn new() -> Self {
         Self {

@@ -163,6 +163,42 @@ pub enum Token {
     CharLiteral(char),
 }
 
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[allow(clippy::match_same_arms)]
+        match self {
+            Self::Fn => write!(f, "`fn`"),
+            Self::Let => write!(f, "`let`"),
+            Self::TypeU8 => write!(f, "`u8`"),
+            Self::TypeI8 => write!(f, "`i8`"),
+            Self::TypeU16 => write!(f, "`u16`"),
+            Self::TypeI16 => write!(f, "`i16`"),
+            Self::TypeU32 => write!(f, "`u32`"),
+            Self::TypeI32 => write!(f, "`i32`"),
+            Self::TypeU64 => write!(f, "`u64`"),
+            Self::TypeI64 => write!(f, "`i64`"),
+            Self::TypeStr => write!(f, "`str`"),
+            Self::LBrace => write!(f, "`{{`"),
+            Self::RBrace => write!(f, "`}}`"),
+            Self::LParen => write!(f, "`(`"),
+            Self::RParen => write!(f, "`)`"),
+            Self::LSquare => write!(f, "`[`"),
+            Self::RSquare => write!(f, "`]`"),
+            Self::Colon => write!(f, "`:`"),
+            Self::DoubleColon => write!(f, "`::`"),
+            Self::Semicolon => write!(f, "`;`"),
+            Self::Equals => write!(f, "`=`"),
+            Self::LAngle => write!(f, "`<`"),
+            Self::RAngle => write!(f, "`>`"),
+            Self::Comma => write!(f, "`,`"),
+            Self::Identifier(s) => write!(f, "`{s}`"),
+            Self::IntLiteral(s) => write!(f, "`{s}`"),
+            Self::StringLiteral(s) => write!(f, "`\"{s}\"`"),
+            Self::CharLiteral(c) => write!(f, "`'{c}'`"),
+        }
+    }
+}
+
 fn parse_string(lex: &logos::Lexer<Token>) -> std::result::Result<String, LexingError> {
     let s = lex.slice();
     let span = lex.span();

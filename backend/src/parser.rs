@@ -17,33 +17,33 @@ use crate::tokenizer::{Locatable, Token};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default, Error, Diagnostic, Serialize)]
 pub enum ParsingErrorKind {
-    #[error("Unexpected token: expected {expected:?}, found {found:?}")]
+    #[error("Unexpected token: expected {expected}, found {found}")]
     WrongToken { expected: Token, found: Token },
     #[error("Unexpected end of input")]
     UnexpectedEOF,
-    #[error("Unexpected token, expected one of {expected:?}, found {found:?}")]
+    #[error("Unexpected token, expected one of {expected:?}, found {found}")]
     WrongTokenOneOf { expected: Vec<Token>, found: Token },
-    #[error("Expected identifier, found {found:?}")]
+    #[error("Expected identifier, found {found}")]
     ExpectedIdentifier { found: Token },
     #[error("Variable '{name}' already declared in this scope")]
     VariableAlreadyDeclared { name: String },
-    #[error("Expected token type {expected:?}, found {found:?}")]
+    #[error("Expected token type `{expected}`, found {found}")]
     ExpectedTokenType { expected: String, found: Token },
     #[error("Variable '{name}' not declared before assignment")]
     VariableNotDeclared { name: String },
-    #[error("Expected expression, found {found:?}")]
+    #[error("Expected expression, found {found}")]
     ExpectedExpression { found: Token },
-    #[error("Expected integer literal, found {found:?}")]
+    #[error("Expected integer literal, found {found}")]
     ExpectedIntLiteral { found: Token },
     #[error("Cannot parse integer literal '{literal}' as non-integer type {type_name}")]
     InvalidIntLiteralTypeMismatch { literal: String, type_name: String },
     #[error("Integer literal parsing error: {message}")]
     InvalidIntLiteral { message: String },
-    #[error("Expected string literal, found {found:?}")]
+    #[error("Expected string literal, found {found}")]
     ExpectedStringLiteral { found: Token },
-    #[error("Expected character literal, found {found:?}")]
+    #[error("Expected character literal, found {found}")]
     ExpectedCharLiteral { found: Token },
-    #[error("Expected type token, found {found:?}")]
+    #[error("Expected type token, found {found}")]
     ExpectedType { found: Token },
     #[default]
     #[error("Unknown Parsing error")]

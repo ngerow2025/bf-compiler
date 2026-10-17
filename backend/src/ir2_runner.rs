@@ -1,25 +1,40 @@
-use std::{
-    collections::HashMap,
-    hash::BuildHasher,
-    io::{self, Write},
-};
+use std::{collections::HashMap, hash::BuildHasher};
+
+#[cfg(feature = "advanced-output")]
+use std::io::{self, Write};
 
 use crate::{
-    input_grabbing::read_single_byte,
     ir2::{Ir2Function, Ir2Instruction},
     ir2_memory_representation::{PhysicalLocation, PhysicalSlot, Tape, TapeView},
     parser::FunctionId,
     util::{cartesian_product_iter, transpose},
 };
 
+#[cfg(feature = "advanced-output")]
+use crate::input_grabbing::{RawModeGuard, read_single_byte};
+
 struct Ir2GlobalContext<'a, S: BuildHasher> {
     pub functions: Vec<&'a Ir2Function>,
     pub function_name_mapping: HashMap<FunctionId, String, S>,
 }
 
-pub fn run_ir2<S: BuildHasher>(
+trait InputProvider: Fn() -> Option<u8> {}
+impl<T: Fn() -> Option<u8>> InputProvider for T {}
+
+trait OutputConsumer: Fn(u8) {}
+impl<T: Fn(u8)> OutputConsumer for T {}
+
+struct Ir2RuntimeContext<'a, I: InputProvider, O: OutputConsumer, S: BuildHasher> {
+    global_context: &'a Ir2GlobalContext<'a, S>,
+    input_provider: I,
+    output_consumer: O,
+}
+
+pub fn run_ir2<InputProvider: Fn() -> Option<u8>, OutputConsumer: Fn(u8), S: BuildHasher>(
     ir_functions: Vec<&Ir2Function>,
     function_name_mapping: HashMap<FunctionId, String, S>,
+    input_provider: InputProvider,
+    output_consumer: OutputConsumer,
 ) {
     let global_context = Ir2GlobalContext {
         functions: ir_functions,
@@ -35,26 +50,48 @@ pub fn run_ir2<S: BuildHasher>(
     }
 
     if let Some(main_id) = main_function_id {
-        let _raw_input_guard = crate::input_grabbing::RawModeGuard::new();
+        let runtime_context = Ir2RuntimeContext {
+            global_context: &global_context,
+            input_provider,
+            output_consumer,
+        };
         let mut main_tape = Tape::new();
-        run_function(main_id, &global_context, TapeView::new(&mut main_tape));
+        run_function(main_id, &runtime_context, TapeView::new(&mut main_tape));
     } else {
         panic!("No main function found in function name mapping");
     }
 }
 
-fn run_function<S: BuildHasher>(
+#[cfg(feature = "advanced-output")]
+pub fn run_ir2_console<S: BuildHasher>(
+    ir_functions: Vec<&Ir2Function>,
+    function_name_mapping: HashMap<FunctionId, String, S>,
+) {
+    let _raw_input_guard = RawModeGuard::new();
+    run_ir2(
+        ir_functions,
+        function_name_mapping,
+        || Some(read_single_byte()),
+        |b: u8| {
+            print!("{}", b as char);
+            io::stdout().flush().expect("failed to flush stdout");
+        },
+    );
+}
+
+fn run_function<I: InputProvider, O: OutputConsumer, S: BuildHasher>(
     function_id: FunctionId,
-    global_context: &Ir2GlobalContext<S>,
+    runtime_context: &Ir2RuntimeContext<I, O, S>,
     mut memory: TapeView,
 ) {
+    let global_context = runtime_context.global_context;
     let function = global_context
         .functions
         .iter()
         .find(|f| f.id == function_id)
         .expect("Function ID not found in global context");
 
-    run_instructions(&function.code, global_context, &mut memory);
+    run_instructions(&function.code, runtime_context, &mut memory);
 }
 
 fn assert_non_overlapping_ranges(a: PhysicalSlot, b: PhysicalSlot) {
@@ -75,9 +112,9 @@ fn assert_offset_not_in_array_min_span(
     );
 }
 
-fn run_instructions<S: BuildHasher>(
+fn run_instructions<I: InputProvider, O: OutputConsumer, S: BuildHasher>(
     instructions: &[Ir2Instruction],
-    global_context: &Ir2GlobalContext<S>,
+    runtime_context: &Ir2RuntimeContext<I, O, S>,
     memory: &mut TapeView,
 ) {
     for instruction in instructions {
@@ -88,7 +125,7 @@ fn run_instructions<S: BuildHasher>(
             } => {
                 run_function(
                     *function_id,
-                    global_context,
+                    runtime_context,
                     memory.get_offset_view(*new_stack_frame_base),
                 );
             }
@@ -313,13 +350,12 @@ fn run_instructions<S: BuildHasher>(
                     1,
                     "Input instruction target must be a single byte"
                 );
-                let input_byte = read_single_byte();
+                let input_byte = (runtime_context.input_provider)().unwrap_or(0);
                 memory.write(*target.get_all_locations().first().unwrap(), input_byte);
             }
             Ir2Instruction::Output { element } => {
                 let output_byte = memory.read(*element.get_all_locations().first().unwrap());
-                print!("{}", output_byte as char);
-                io::stdout().flush().expect("failed to flush stdout");
+                (runtime_context.output_consumer)(output_byte);
             }
         }
     }
@@ -332,10 +368,15 @@ pub fn test_instructions(instructions: &[Ir2Instruction], start_tape: Vec<u8>) -
         functions: vec![],
         function_name_mapping: HashMap::new(),
     };
+    let runtime_context = Ir2RuntimeContext {
+        global_context: &global_context,
+        input_provider: || None,
+        output_consumer: |_| {},
+    };
     let mut tape = Tape { data: start_tape };
     let mut tape_view = TapeView::new(&mut tape);
 
-    run_instructions(instructions, &global_context, &mut tape_view);
+    run_instructions(&instructions, &runtime_context, &mut tape_view);
     tape.data
 }
 
