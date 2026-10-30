@@ -17,4 +17,6 @@ pub mod tokenizer;
 pub mod type_check;
 pub mod ucodegen;
 pub mod util;
+#[cfg(target_arch = "wasm32")]
 pub mod wasm_api;
+pub mod ir2_vis;
