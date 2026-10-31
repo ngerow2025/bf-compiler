@@ -136,6 +136,14 @@ fn main() -> Result<()> {
 
     let generated_ir2 = generate_ir2(&generated_ir);
 
+    for ir2_function in generated_ir2.values() {
+        println!("IR2 for function {}:", ir2_function.id);
+        for instruction in &ir2_function.code {
+            println!("  {}", instruction);
+        }
+        println!();
+    }
+
     #[cfg(feature = "advanced-output")]
     if cli.run {
         println!("Running IR2... -----------------------");

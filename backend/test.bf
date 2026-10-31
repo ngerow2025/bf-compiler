@@ -6,7 +6,7 @@ fn greet() {
     strOut(world);
 
     let name: str<10> = "Alice     ";
-    strOut("Hello     ")
+    strOut("Hello     ");
     strOut(name);
     strOut("!\r\n       ");
 }

@@ -580,17 +580,7 @@ fn convert_instruction(
                 .expect("expected valid register")
                 .size;
 
-            let tmp_offset_location = physical_space_allocator.allocate(
-                function
-                    .registers
-                    .get(offset)
-                    .expect("expected valid register")
-                    .size,
-                format!(
-                    "indirect_read_offset_tmp({})",
-                    function.registers.get(offset).unwrap().description
-                ),
-            );
+            
             let tmp_output_location_1 = physical_space_allocator.allocate(
                 output_size,
                 format!(
@@ -606,45 +596,23 @@ fn convert_instruction(
                 ),
             );
 
-            let usage_offset_location = physical_space_allocator.allocate(
-                function
-                    .registers
-                    .get(offset)
-                    .expect("expected valid register")
-                    .size,
-                format!(
-                    "indirect_read_usage_offset_tmp({})",
-                    function.registers.get(offset).unwrap().description
-                ),
-            );
-
-            //move offset -> tmp_offset, usage_offset
             //indirect read base, usage_offset -> tmp_output
             //move tmp_output -> output, tmp_output_2
-            //move tmp_offset -> offset, usage_offset
             //indirect write base, usage_offset, tmp_output_2
 
             vec![
-                Ir2Instruction::NMove {
-                    source: offset_location,
-                    targets: vec![tmp_offset_location, usage_offset_location],
-                },
                 Ir2Instruction::MoveFromIndirect {
                     base: base_location.get_start(),
-                    offset: usage_offset_location,
+                    offset: offset_location,
                     output: tmp_output_location_1,
                 },
                 Ir2Instruction::NMove {
                     source: tmp_output_location_1,
                     targets: vec![output_location, tmp_output_location_2],
                 },
-                Ir2Instruction::NMove {
-                    source: tmp_offset_location,
-                    targets: vec![offset_location, usage_offset_location],
-                },
                 Ir2Instruction::MoveToIndirect {
                     base: base_location.get_start(),
-                    offset: usage_offset_location,
+                    offset: offset_location,
                     value: tmp_output_location_2,
                 },
             ]
@@ -673,28 +641,6 @@ fn convert_instruction(
                 .expect("expected valid register mapping")
                 .location;
 
-            let tmp_offset_location = physical_space_allocator.allocate(
-                function
-                    .registers
-                    .get(offset)
-                    .expect("expected valid register")
-                    .size,
-                format!(
-                    "indirect_write_offset_tmp({})",
-                    function.registers.get(offset).unwrap().description
-                ),
-            );
-            let usage_offset_location = physical_space_allocator.allocate(
-                function
-                    .registers
-                    .get(offset)
-                    .expect("expected valid register")
-                    .size,
-                format!(
-                    "indirect_write_usage_offset_tmp({})",
-                    function.registers.get(offset).unwrap().description
-                ),
-            );
             let tmp_value_location = physical_space_allocator.allocate(
                 value_location.get_size(),
                 format!(
@@ -710,21 +656,14 @@ fn convert_instruction(
                 ),
             );
 
-            //move offset -> tmp_offset, usage_offset
-            //indirect clear base, usage_offset
+            //indirect clear base, offset
             //move value -> tmp_value, usage_value
-            //move tmp_offset -> offset, usage_offset
-            //indirect write base, usage_offset, usage_value
+            //indirect write base, offset, usage_value
             //move tmp_value -> value
-
-            code_sequence.push(Ir2Instruction::NMove {
-                source: offset_location,
-                targets: vec![tmp_offset_location, usage_offset_location],
-            });
 
             code_sequence.push(Ir2Instruction::ClearIndirect {
                 base: base_location.get_start(),
-                offset: usage_offset_location,
+                offset: offset_location,
             });
 
             code_sequence.push(Ir2Instruction::NMove {
@@ -732,14 +671,9 @@ fn convert_instruction(
                 targets: vec![tmp_value_location, usage_value_location],
             });
 
-            code_sequence.push(Ir2Instruction::NMove {
-                source: tmp_offset_location,
-                targets: vec![offset_location, usage_offset_location],
-            });
-
             code_sequence.push(Ir2Instruction::MoveToIndirect {
                 base: base_location.get_start(),
-                offset: usage_offset_location,
+                offset: offset_location,
                 value: usage_value_location,
             });
 
